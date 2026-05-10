@@ -63,7 +63,7 @@ Plan first, code second. Verify before claim.
 ## Self-Maintenance（Boris 原則：Claude 做錯就加進 CLAUDE.md）
 - **MUST** 同錯第二次發生 → 主動提議加進對應 CLAUDE.md / rules（用戶確認後再寫）；只記「為何」+「下次如何避免」
 - 學到教訓：專案特定 → `tasks/lessons.md`（隨 git）；跨專案 → auto memory 或本檔
-- 月度 review 觸發：主檔逼近 100 行 → 拆 `~/.claude/rules/`；逼近 200 行 → 重構
+- 月度 review 觸發：主檔 > 150 行 → 拆出新 path-scoped rule；> 200 行 → 重構整體
 
 ## Git Preferences
 - Conventional Commits zh-TW（commit & PR title 皆 zh-TW）：`feat(api): 新增 xxx`、`fix(ui): 修正 xxx`、`chore(deps): 更新 xxx`
@@ -99,8 +99,7 @@ Plan first, code second. Verify before claim.
 - 修改前確認 git status clean；不直接覆寫 production config
 
 ## Communication
-- 口語化；speculation OK 但要標記
-- 該問就問（ambiguity / 多種解讀 / 不確定影響面 → 停下、明確說出困惑點再問）；問時含推薦預設 + 答案如何影響結果；已決事項不畫蛇添足建議 alternatives
+- 該問就問（ambiguity / 多種解讀 / 不確定影響面 → 停下、明確說出困惑點再問）；問時含推薦預設 + 答案如何影響結果；已決事項不畫蛇添足建議 alternatives；speculation OK 但要標記
 
 ## 可選載入（按專案語境用 @import 顯式引入）
 - .NET：`@~/.claude/rules/dotnet.md`
