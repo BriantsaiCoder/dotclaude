@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "mkdir -p \"${CLAUDE_PROJECT_DIR:-.}/.remember/logs\"",
+            "command": "mkdir -p \"${CLAUDE_PROJECT_DIR:-.}/.remember/logs\" \"${CLAUDE_PROJECT_DIR:-.}/.remember/tmp\"",
             "timeout": 2,
             "async": false
           },
