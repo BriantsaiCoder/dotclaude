@@ -44,7 +44,7 @@
 
 ## Security
 - Secrets：env var 或 secret manager；提供 `.env.example`（只 key name）
-- Web API auth 與 frontend storage 細則：進 SPA 專案時用 `@~/.claude/rules/frontend-spa.md` 顯式載入（WinForms 等 desktop 細則見文末附錄）
+- Web API auth 與 frontend SPA storage 細則：進 SPA 專案時用 `@~/.claude/rules/frontend-spa.md` 顯式載入
 
 ## Workflow
 Plan first, code second. Verify before claim.

@@ -4,6 +4,7 @@
 # 追蹤目標：核心設定檔
 !.gitignore
 !CLAUDE.md
+!README.md
 
 # 追蹤目標：規則與模板
 !rules/
