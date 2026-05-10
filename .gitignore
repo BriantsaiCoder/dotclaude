@@ -1,0 +1,39 @@
+# Allowlist 策略：預設忽略所有檔案，只追蹤用戶明確維護的設定
+*
+
+# 追蹤目標：核心設定檔
+!.gitignore
+!CLAUDE.md
+
+# 追蹤目標：規則與模板
+!rules/
+!rules/**
+!templates/
+!templates/**
+
+# 追蹤目標：自訂 commands / hooks / agents / skills
+!commands/
+!commands/**
+!hooks/
+!hooks/**
+!agents/
+!agents/**
+!skills/
+!skills/**
+
+# 追蹤目標：頂層設定
+!settings.json
+!statusline-command.sh
+!playwright-mcp-config.json
+
+# 即使在被允許追蹤的目錄下也排除：備份、暫存、敏感資料
+**/.DS_Store
+**/*.bak
+**/*.bak.*
+**/*.backup
+**/*.backup.*
+**/*.log
+**/node_modules/
+
+# 排除：本地專屬設定（包含敏感變數，per Hard Rules 不 commit）
+settings.local.json

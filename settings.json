@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "cleanupPeriodDays": 90,
+  "env": {
+    "DOTNET_CLI_HOME": "/Users/pochientsai/.dotnet"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "permissions": {
+    "allow": [
+      "Bash(rm *.tmp)",
+      "Bash(rm *.log)",
+      "Bash(git push --force-with-lease *)",
+      "Bash(dotnet dev-certs *)",
+      "Bash(gh *)",
+      "Bash(jq *)",
+      "Bash(sqlite3 *)",
+      "mcp__plugin_context7_context7__*",
+      "mcp__plugin_microsoft-docs_microsoft-learn__*",
+      "mcp__plugin_playwright_playwright__*",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__*",
+      "mcp__shadcn__*",
+      "mcp__plugin_github_github__get_*",
+      "mcp__plugin_github_github__list_*",
+      "mcp__plugin_github_github__search_*",
+      "mcp__plugin_github_github__issue_read",
+      "mcp__plugin_github_github__pull_request_read",
+      "mcp__plugin_github_github__get_file_contents",
+      "mcp__plugin_github_github__get_me"
+    ],
+    "deny": [
+      "Bash(cat .env*)",
+      "Bash(cat */.env*)",
+      "Bash(cat **/appsettings.*.json)",
+      "Bash(cat **/*.pfx)",
+      "Bash(cat **/*.key)",
+      "Bash(cat **/*.pem)",
+      "Bash(grep * .env*)",
+      "Bash(grep * */.env*)",
+      "Bash(sed * .env*)",
+      "Bash(sed * */.env*)",
+      "Bash(git checkout .)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore .)",
+      "Bash(git restore --staged *)",
+      "Bash(git restore --source *)",
+      "Bash(npm publish *)",
+      "Bash(dotnet user-secrets *)",
+      "Bash(launchctl *)",
+      "Bash(defaults write *)"
+    ],
+    "defaultMode": "auto",
+    "additionalDirectories": [
+      "/Users/pochientsai/.agents"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/patch-chrome-devtools-mcp.sh",
+            "timeout": 3,
+            "async": false
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/patch-playwright-mcp.sh",
+            "timeout": 3,
+            "async": false
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/session-time.sh",
+            "timeout": 2,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/audit-bash.sh",
+            "timeout": 3,
+            "async": true
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": {
+    "chrome-devtools-mcp@claude-plugins-official": true,
+    "clangd-lsp@claude-plugins-official": true,
+    "claude-code-setup@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "codex@openai-codex": true,
+    "commit-commands@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "csharp-lsp@claude-plugins-official": true,
+    "document-skills@anthropic-agent-skills": true,
+    "feature-dev@claude-plugins-official": true,
+    "github@claude-plugins-official": true,
+    "hookify@claude-plugins-official": true,
+    "microsoft-docs@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true,
+    "ralph-loop@claude-plugins-official": true,
+    "remember@claude-plugins-official": true,
+    "security-guidance@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "ui-ux-pro-max@ui-ux-pro-max-skill": true,
+    "pr-review-toolkit@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "openai-codex": {
+      "source": {
+        "source": "github",
+        "repo": "openai/codex-plugin-cc"
+      }
+    }
+  },
+  "language": "zh-TW",
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false,
+    "network": {
+      "allowedDomains": [
+        "api.nuget.org",
+        "*.nuget.org",
+        "pkgs.dev.azure.com",
+        "nuget.pkg.github.com",
+        "registry.npmjs.org",
+        "*.npmjs.org",
+        "github.com",
+        "api.github.com",
+        "codeload.github.com",
+        "*.github.com",
+        "*.githubusercontent.com",
+        "raw.githubusercontent.com",
+        "objects.githubusercontent.com",
+        "registry-1.docker.io",
+        "auth.docker.io",
+        "production.cloudflare.docker.com",
+        "registry.hub.docker.com",
+        "ghcr.io",
+        "*.pkg.github.com",
+        "playwright.download.prss.microsoft.com",
+        "cdn.playwright.dev",
+        "dotnetcli.azureedge.net",
+        "download.visualstudio.microsoft.com",
+        "aka.ms",
+        "fonts.googleapis.com",
+        "fonts.gstatic.com",
+        "registry.yarnpkg.com",
+        "cdn.jsdelivr.net",
+        "cdnjs.cloudflare.com",
+        "unpkg.com",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "mcr.microsoft.com",
+        "nodejs.org",
+        "storage.googleapis.com",
+        "pkg-containers.githubusercontent.com"
+      ],
+      "allowLocalBinding": true,
+      "allowMachLookup": [
+        "com.apple.trustd",
+        "com.apple.trustd.agent"
+      ]
+    },
+    "filesystem": {
+      "allowWrite": [
+        "/Users/pochientsai/.nuget",
+        "/Users/pochientsai/.dotnet",
+        "/Users/pochientsai/.npm",
+        "/Users/pochientsai/.cache",
+        "/Users/pochientsai/Library/Caches",
+        "/Users/pochientsai/.agents",
+        "/Users/pochientsai/.claude",
+        "/Users/pochientsai/.copilot"
+      ]
+    }
+  },
+  "alwaysThinkingEnabled": true,
+  "effortLevel": "xhigh",
+  "autoCompactWindow": 180000,
+  "autoUpdatesChannel": "latest",
+  "showThinkingSummaries": true,
+  "skipDangerousModePermissionPrompt": true,
+  "skipAutoPermissionPrompt": true,
+  "autoMode": {
+    "allow": [
+      "dotnet build/test/run/watch/restore, dotnet ef migrations add/update (not drop or remove applied migrations)",
+      "npm/pnpm/yarn install/ci/run/test/build, npx <tool>, vitest, playwright test",
+      "docker compose up/down/build/logs/ps, docker run/exec/logs on local containers",
+      "git status/diff/log/show/add/commit/branch (no -D)/checkout <branch>/pull/fetch/stash push/push (non-force)/push --force-with-lease"
+    ],
+    "soft_deny": [
+      "Reading or exfiltrating secret files (.env*, appsettings.*.json, *.pem/*.key/*.pfx, ~/.ssh/id_*, ~/.aws/credentials, .npmrc, .netrc) via any reader (cat/less/more/head/tail/bat/xxd/od/hexdump/base64/openssl) or piping them into network tools (curl/nc/scp/rsync).",
+      "Destructive SQL through psql/mysql/mariadb/sqlcmd: DROP DATABASE/TABLE/SCHEMA, TRUNCATE, or unqualified DELETE/UPDATE.",
+      "Destructive NoSQL: mongosh drop/dropDatabase, redis-cli FLUSHDB/FLUSHALL, DETACH DATABASE.",
+      "Publishing to external registries: npm/yarn/pnpm publish, dotnet nuget push, cargo publish, gem push, twine upload, docker/helm push to public registries.",
+      "Modifying local trust or secret stores: dotnet user-secrets set/clear, dotnet dev-certs, security add-trusted-cert, keychain writes, update-ca-certificates.",
+      "Silently discarding uncommitted work: git checkout . / -- <path>, git restore . / --staged / --source, git reflog expire, git stash drop/clear.",
+      "Database or migration destruction: dotnet ef database drop, ef migrations remove after apply, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
+    ],
+    "environment": [
+      "Personal macOS development machine; no production database or cloud credentials present.",
+      "All database work targets local Docker/Testcontainers or local service instances.",
+      "Sandbox is enabled and autoAllowBashIfSandboxed is true — project workspace writable; package manager caches (npm, NuGet, .NET, Playwright browsers) also whitelisted via allowWrite.",
+      "Preferred stacks: .NET 8 / ASP.NET Core, EF Core, PostgreSQL, Vite + React/Vue, Tailwind, Docker Compose.",
+      "Package manager: npm only (no pnpm/yarn). E2E via Playwright. Containers via Docker Compose."
+    ]
+  }
+}
