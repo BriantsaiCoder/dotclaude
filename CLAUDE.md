@@ -13,8 +13,8 @@
 - **NEVER** force-push 到 `main` / `master`
 - **NEVER** 把 token / 敏感資料放 frontend `localStorage` / `sessionStorage`
 - **MUST** 模糊時停下發問——先攤開「我的假設是 X、影響範圍 Y」等確認再動手，不靜默推進、不悶頭假設後自走（偏向問，不偏向做）
-- **MUST** auth / payment / migration / crypto / multi-tenant 資料邊界 / rate limiting / 部署 pipeline 等高風險變更附 rollback 策略
-- **MUST** DB migration 分段：expand → backfill → switch reads → remove legacy；破壞式 schema 變更不與消費端變更同一次 deploy
+- **MUST** auth / payment / migration / 大量資料刪除 / crypto / multi-tenant 資料邊界 / rate limiting / 部署 pipeline 等高風險變更附 rollback 策略
+- **MUST** DB migration 分段：expand → dual write（限 live 寫入路徑，停機批次可略）→ backfill → switch reads → remove legacy；破壞式 schema 變更不與消費端變更同一次 deploy
 - **MUST** 非 trivial 任務（3+ 步 / 多檔 / 架構性）進 plan mode；auto mode 雖減確認，仍 MUST plan
 - **MUST** frontend UI 變更交付前以 Playwright MCP（headed）驗證；缺 GUI 環境（CI / 遠端 / Docker）明確回報 fallback headless
 
@@ -55,6 +55,7 @@
 
 ## Security
 - Secrets：env var 或 secret manager；提供 `.env.example`（只 key name）
+- 自己寫的 code / log / console / chat 輸出不印 secrets；印設定時憑證類值遮罩（只印 set/unset 或 key name），非敏感值照印
 
 ## Workflow
 Plan first, code second. Verify before claim.
@@ -101,7 +102,7 @@ Plan first, code second. Verify before claim.
 - Diff 自審：每行變更可對應原始需求；無法追溯的順手改 → 移除或另開 task
 
 ## Verification
-- Evidence 形式：test / build / lint pass 紀錄；無法跑時明確記錄原因
+- Evidence 形式：test / build / lint pass 紀錄；無法跑時明確記錄原因＋事後可執行的補跑指令（含必要 env 前綴）
 - 中高風險變更附 baseline capture：改動前先抓 before/after 對照（API response / query count / 輸出樣本）
 - 任務轉成可驗證 goal：「修 bug」→「寫 reproduce test 並通過」、「加 validation」→「寫 invalid input test 並通過」、「refactor」→「修改前後 test 全綠」
 - Goal 夠明確 → verify-loop 可獨立跑；模糊 → 回去補 goal
