@@ -25,3 +25,5 @@ paths:
 - Selector 優先序：getByRole / getByLabel / visible text / getByTestId；CSS selector avoid（third-party 元件無 a11y 等明確理由除外）
 - Naming：`MethodName_Scenario_ExpectedResult`（.NET）、`describe/it` 自然語言（frontend）
 - Integration tests 涵蓋 critical paths（auth / payment / 持久化 / 外部整合）
+- Timing / concurrency bug 的 regression test 須針對 race 條件（重複執行 / stress），單次通過不算證據
+- 設計面優先以 idempotency / transaction boundary 消除 race，不以 sleep / retry 掩蓋

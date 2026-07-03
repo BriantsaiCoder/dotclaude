@@ -13,7 +13,8 @@
 - **NEVER** force-push 到 `main` / `master`
 - **NEVER** 把 token / 敏感資料放 frontend `localStorage` / `sessionStorage`
 - **MUST** 模糊時停下發問——先攤開「我的假設是 X、影響範圍 Y」等確認再動手，不靜默推進、不悶頭假設後自走（偏向問，不偏向做）
-- **MUST** auth / payment / migration / crypto 等高風險變更附 rollback 策略
+- **MUST** auth / payment / migration / crypto / multi-tenant 資料邊界 / rate limiting / 部署 pipeline 等高風險變更附 rollback 策略
+- **MUST** DB migration 分段：expand → backfill → switch reads → remove legacy；破壞式 schema 變更不與消費端變更同一次 deploy
 - **MUST** 非 trivial 任務（3+ 步 / 多檔 / 架構性）進 plan mode；auto mode 雖減確認，仍 MUST plan
 - **MUST** frontend UI 變更交付前以 Playwright MCP（headed）驗證；缺 GUI 環境（CI / 遠端 / Docker）明確回報 fallback headless
 
@@ -57,7 +58,7 @@
 
 ## Workflow
 Plan first, code second. Verify before claim.
-- **MUST** Plan mode 輸出編號步驟、影響檔案、預期結果，等用戶確認再動手
+- **MUST** Plan mode 輸出編號步驟、影響檔案、預期結果、風險等級（低/中/高；中高須含 rollback 策略與加強驗證），等用戶確認再動手
 - Push back：用戶需求有更簡單做法 → 直說並建議，不盲從複雜實作。Trigger：(a) 標準函式庫已有卻引新依賴；(b) 50+ 行可由 10 行內建函式取代；(c) 抽象層只有單一使用點；(d) 平台 / 語言原生功能已涵蓋卻自寫或引依賴（HTML `<input type="date">` 勝過 picker lib、CSS 勝過 JS、DB 約束勝過 app 層、框架內建勝過手刻）；指出更簡單做法時給 trade-off，但別把一般 implementation detail 擴成選項討論
 - 選型優先序：**原生（語言 / 框架 / 平台內建，如 CSS／HTML 原生元素／DB 約束）＞ 標準函式庫 ＝ repo 既有模組／已安裝套件 ＞ 成熟可靠第三方套件 ＞ 自己手寫**。依此序由上往下找，只有在找不到合適方案、依賴成本高於效益、或需求非常小且自寫更直接時才自行實作。新增外部套件前 MUST 評估維護狀態、license、安全性、版本相容與專案既有 dependency policy（CVE 另由 `dependency-security-scan` 把關）。與 Push back (a) 不衝突：(a) 禁「原生／標準庫已有卻引新依賴」，本條規範「前面層級皆無」時套件優先於手刻
 - 自我簡化只動「自己當前正在寫的新 code」，不動既有 code；交付前自問「資深工程師會覺得 overcomplicated 嗎」（典型訊號：可壓縮 ≥ 50% 行數、抽象層只有單一 caller、提早泛型化），是則 rewrite
@@ -69,6 +70,7 @@ Plan first, code second. Verify before claim.
 ## Self-Maintenance（Boris 原則：Claude 做錯就加進 CLAUDE.md）
 - **MUST** 同錯第二次發生 → 主動提議加進對應 CLAUDE.md / rules（用戶確認後再寫）；只記「為何」+「下次如何避免」
 - 學到教訓：專案特定 → `tasks/lessons.md`（隨 git）；跨專案 → auto memory 或本檔
+- 沉澱前評估「能否機械化」：預防檢查可寫成 hook / test / lint 者，考慮落地為機械守護（如 hookify）取代 prose；判斷類知識才寫 prose
 
 ## Git Preferences
 - Conventional Commits zh-TW（commit & PR title 皆 zh-TW）：`feat(api): 新增 xxx`、`fix(ui): 修正 xxx`、`chore(deps): 更新 xxx`
@@ -100,6 +102,7 @@ Plan first, code second. Verify before claim.
 
 ## Verification
 - Evidence 形式：test / build / lint pass 紀錄；無法跑時明確記錄原因
+- 中高風險變更附 baseline capture：改動前先抓 before/after 對照（API response / query count / 輸出樣本）
 - 任務轉成可驗證 goal：「修 bug」→「寫 reproduce test 並通過」、「加 validation」→「寫 invalid input test 並通過」、「refactor」→「修改前後 test 全綠」
 - Goal 夠明確 → verify-loop 可獨立跑；模糊 → 回去補 goal
 - 修改前確認 git status clean；不直接覆寫 production config
