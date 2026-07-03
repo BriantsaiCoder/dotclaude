@@ -9,6 +9,7 @@ paths:
 # C / C++ 規則
 
 ## 新專案預設
+- 語言標準：C++20、C17
 - CMake ≥ 3.20 + `CMakePresets.json`
 - vcpkg manifest mode（Conan 2 替代）
 - GoogleTest（Catch2 替代）

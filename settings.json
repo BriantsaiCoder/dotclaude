@@ -22,9 +22,6 @@
       "mcp__plugin_playwright_playwright__*",
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__*",
       "mcp__shadcn__*",
-      "mcp__plugin_github_github__get_*",
-      "mcp__plugin_github_github__list_*",
-      "mcp__plugin_github_github__search_*",
       "mcp__plugin_github_github__issue_read",
       "mcp__plugin_github_github__pull_request_read",
       "mcp__plugin_github_github__get_file_contents",
@@ -49,23 +46,21 @@
       "Bash(npm publish *)",
       "Bash(dotnet user-secrets *)",
       "Bash(launchctl *)",
-      "Bash(defaults write *)"
+      "Bash(defaults write *)",
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Bash(git reset --hard *)"
     ],
     "defaultMode": "auto",
     "additionalDirectories": [
       "/Users/pochientsai/.agents"
     ]
   },
+  "model": "claude-fable-5[1m]",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "mkdir -p \"${CLAUDE_PROJECT_DIR:-.}/.remember/logs\" \"${CLAUDE_PROJECT_DIR:-.}/.remember/tmp\"",
-            "timeout": 2,
-            "async": false
-          },
           {
             "type": "command",
             "command": "bash ~/.claude/hooks/patch-chrome-devtools-mcp.sh",
@@ -104,6 +99,30 @@
             "async": true
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/guard-cookbook-orphan.sh",
+            "timeout": 5,
+            "async": false
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/watch-ci-after-push.sh",
+            "timeout": 5,
+            "async": false
+          }
+        ]
       }
     ]
   },
@@ -121,7 +140,6 @@
     "commit-commands@claude-plugins-official": true,
     "context7@claude-plugins-official": true,
     "csharp-lsp@claude-plugins-official": true,
-    "document-skills@anthropic-agent-skills": true,
     "feature-dev@claude-plugins-official": true,
     "github@claude-plugins-official": true,
     "hookify@claude-plugins-official": true,
@@ -133,13 +151,26 @@
     "superpowers@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
     "ui-ux-pro-max@ui-ux-pro-max-skill": true,
-    "pr-review-toolkit@claude-plugins-official": true
+    "pr-review-toolkit@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "code-review@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "firecrawl@claude-plugins-official": true,
+    "code-modernization@claude-plugins-official": true,
+    "ponytail@ponytail": true
   },
   "extraKnownMarketplaces": {
     "openai-codex": {
       "source": {
         "source": "github",
         "repo": "openai/codex-plugin-cc"
+      }
+    },
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
       }
     }
   },
@@ -186,7 +217,16 @@
         "mcr.microsoft.com",
         "nodejs.org",
         "storage.googleapis.com",
-        "pkg-containers.githubusercontent.com"
+        "pkg-containers.githubusercontent.com",
+        "google.com",
+        "*.google.com",
+        "*.gstatic.com"
+      ],
+      "allowUnixSockets": [
+        "/Users/pochientsai/.agent-browser",
+        "/Users/pochientsai/Library/Application Support/Google/Chrome for Testing",
+        "/tmp/claude-501",
+        "/private/tmp/claude-501"
       ],
       "allowLocalBinding": true,
       "allowMachLookup": [
@@ -198,14 +238,23 @@
       "allowWrite": [
         "/Users/pochientsai/.nuget",
         "/Users/pochientsai/.dotnet",
+        "/tmp/.dotnet",
+        "/private/tmp/.dotnet",
         "/Users/pochientsai/.npm",
         "/Users/pochientsai/.cache",
         "/Users/pochientsai/Library/Caches",
         "/Users/pochientsai/.agents",
         "/Users/pochientsai/.claude",
-        "/Users/pochientsai/.copilot"
+        "/Users/pochientsai/.copilot",
+        "/Users/pochientsai/.codex",
+        "/Users/pochientsai/Downloads/coding_agent_project",
+        "/Users/pochientsai/.agent-browser",
+        "/Users/pochientsai/Library/Application Support/Google/Chrome for Testing"
       ]
-    }
+    },
+    "excludedCommands": [
+      "agent-browser"
+    ]
   },
   "alwaysThinkingEnabled": true,
   "effortLevel": "xhigh",
@@ -213,6 +262,7 @@
   "autoUpdatesChannel": "latest",
   "showThinkingSummaries": true,
   "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
   "skipAutoPermissionPrompt": true,
   "autoMode": {
     "allow": [
@@ -237,5 +287,6 @@
       "Preferred stacks: .NET 8 / ASP.NET Core, EF Core, PostgreSQL, Vite + React/Vue, Tailwind, Docker Compose.",
       "Package manager: npm only (no pnpm/yarn). E2E via Playwright. Containers via Docker Compose."
     ]
-  }
+  },
+  "agentPushNotifEnabled": true
 }
