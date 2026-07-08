@@ -6,6 +6,10 @@
 !CLAUDE.md
 !README.md
 
+# 追蹤目標：core symlink（tier0-2 @import 目標；斷鏈=安全紅線靜默消失）
+!core/
+!core/**
+
 # 追蹤目標：規則與模板
 !rules/
 !rules/**
