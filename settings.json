@@ -102,6 +102,12 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash ~/.claude/hooks/guard-git-push.sh",
+            "timeout": 3,
+            "async": false
+          },
+          {
+            "type": "command",
             "command": "~/.claude/hooks/audit-bash.sh",
             "timeout": 3,
             "async": true
