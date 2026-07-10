@@ -12,6 +12,9 @@
     "allow": [
       "Bash(rm *.tmp)",
       "Bash(rm *.log)",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
       "Bash(git push --force-with-lease *)",
       "Bash(dotnet dev-certs *)",
       "Bash(gh *)",
@@ -56,7 +59,6 @@
       "/Users/pochientsai/.agents"
     ]
   },
-  "model": "claude-fable-5[1m]",
   "hooks": {
     "SessionStart": [
       {
@@ -71,6 +73,12 @@
             "type": "command",
             "command": "bash ~/.claude/hooks/patch-playwright-mcp.sh",
             "timeout": 3,
+            "async": false
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.agents/hooks/drift-check.sh",
+            "timeout": 10,
             "async": false
           }
         ]
@@ -132,12 +140,12 @@
   },
   "enabledPlugins": {
     "chrome-devtools-mcp@claude-plugins-official": true,
-    "clangd-lsp@claude-plugins-official": true,
-    "claude-code-setup@claude-plugins-official": true,
+    "clangd-lsp@claude-plugins-official": false,
+    "claude-code-setup@claude-plugins-official": false,
     "claude-md-management@claude-plugins-official": true,
     "code-simplifier@claude-plugins-official": true,
     "codex@openai-codex": true,
-    "commit-commands@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": false,
     "context7@claude-plugins-official": true,
     "csharp-lsp@claude-plugins-official": true,
     "feature-dev@claude-plugins-official": true,
@@ -155,10 +163,21 @@
     "frontend-design@claude-plugins-official": true,
     "code-review@claude-plugins-official": true,
     "skill-creator@claude-plugins-official": true,
-    "rust-analyzer-lsp@claude-plugins-official": true,
-    "firecrawl@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": false,
+    "firecrawl@claude-plugins-official": false,
     "code-modernization@claude-plugins-official": true,
-    "ponytail@ponytail": true
+    "ponytail@ponytail": true,
+    "dotnet@dotnet-agent-skills": false,
+    "dotnet-advanced@dotnet-agent-skills": false,
+    "dotnet-aspnetcore@dotnet-agent-skills": false,
+    "dotnet-data@dotnet-agent-skills": false,
+    "dotnet-diag@dotnet-agent-skills": false,
+    "dotnet-msbuild@dotnet-agent-skills": false,
+    "dotnet-nuget@dotnet-agent-skills": false,
+    "dotnet-test@dotnet-agent-skills": false,
+    "dotnet-test-migration@dotnet-agent-skills": false,
+    "dotnet-upgrade@dotnet-agent-skills": false,
+    "dotnet11@dotnet-agent-skills": false
   },
   "extraKnownMarketplaces": {
     "openai-codex": {
@@ -171,6 +190,12 @@
       "source": {
         "source": "github",
         "repo": "DietrichGebert/ponytail"
+      }
+    },
+    "dotnet-agent-skills": {
+      "source": {
+        "source": "github",
+        "repo": "dotnet/skills"
       }
     }
   },
@@ -263,15 +288,18 @@
   "showThinkingSummaries": true,
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
+  "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
   "autoMode": {
     "allow": [
+      "$defaults",
       "dotnet build/test/run/watch/restore, dotnet ef migrations add/update (not drop or remove applied migrations)",
       "npm/pnpm/yarn install/ci/run/test/build, npx <tool>, vitest, playwright test",
       "docker compose up/down/build/logs/ps, docker run/exec/logs on local containers",
       "git status/diff/log/show/add/commit/branch (no -D)/checkout <branch>/pull/fetch/stash push/push (non-force)/push --force-with-lease"
     ],
     "soft_deny": [
+      "$defaults",
       "Reading or exfiltrating secret files (.env*, appsettings.*.json, *.pem/*.key/*.pfx, ~/.ssh/id_*, ~/.aws/credentials, .npmrc, .netrc) via any reader (cat/less/more/head/tail/bat/xxd/od/hexdump/base64/openssl) or piping them into network tools (curl/nc/scp/rsync).",
       "Destructive SQL through psql/mysql/mariadb/sqlcmd: DROP DATABASE/TABLE/SCHEMA, TRUNCATE, or unqualified DELETE/UPDATE.",
       "Destructive NoSQL: mongosh drop/dropDatabase, redis-cli FLUSHDB/FLUSHALL, DETACH DATABASE.",
@@ -281,6 +309,7 @@
       "Database or migration destruction: dotnet ef database drop, ef migrations remove after apply, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
     ],
     "environment": [
+      "$defaults",
       "Personal macOS development machine; no production database or cloud credentials present.",
       "All database work targets local Docker/Testcontainers or local service instances.",
       "Sandbox is enabled and autoAllowBashIfSandboxed is true — project workspace writable; package manager caches (npm, NuGet, .NET, Playwright browsers) also whitelisted via allowWrite.",
@@ -288,5 +317,5 @@
       "Package manager: npm only (no pnpm/yarn). E2E via Playwright. Containers via Docker Compose."
     ]
   },
-  "agentPushNotifEnabled": true
+  "model": "claude-fable-5[1m]"
 }
