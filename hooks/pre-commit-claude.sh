@@ -65,16 +65,27 @@ done <<< "$staged"
 SECRET_REGEX='(api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|bearer[_-]?token|password|client[_-]?secret|private[_-]?key)["'"'"' ]*[:=][ ]*["'"'"']?[A-Za-z0-9/_+=.-]{16,}'
 HIGH_ENTROPY_HINTS='(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|sk-[A-Za-z0-9]{32,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)'
 
+# 只印檔名:行號＋pattern 類別，不印命中行內容（避免 secret 值進 terminal / scrollback，[T0-4]）
+locate_hits() {
+  local regex="$1" label="$2" f hits
+  while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    hits=$(grep -inE "$regex" "$f" 2>/dev/null | cut -d: -f1 | head -5 | paste -sd, -)
+    [[ -n "$hits" ]] && echo "  $f:${hits} (pattern: $label)" >&2
+  done <<< "$staged"
+  return 0  # 無命中時勿讓迴圈尾狀態 1 觸發 set -e
+}
+
 diff_added=$(git diff --cached --diff-filter=ACMR -U0 | grep -E '^\+' | grep -vE '^\+\+\+' || true)
 if [[ -n "$diff_added" ]]; then
   if echo "$diff_added" | grep -iE "$SECRET_REGEX" > /dev/null; then
     fail "疑似明文 secret（key=value 形式）— 檢查 staged 變更"
-    echo "$diff_added" | grep -inE "$SECRET_REGEX" | head -5 >&2
+    locate_hits "$SECRET_REGEX" "SECRET_REGEX"
     errors=$((errors + 1))
   fi
   if echo "$diff_added" | grep -E "$HIGH_ENTROPY_HINTS" > /dev/null; then
     fail "疑似高熵 token / 私鑰"
-    echo "$diff_added" | grep -nE "$HIGH_ENTROPY_HINTS" | head -5 >&2
+    locate_hits "$HIGH_ENTROPY_HINTS" "HIGH_ENTROPY_HINTS"
     errors=$((errors + 1))
   fi
 fi
