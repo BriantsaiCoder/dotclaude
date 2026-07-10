@@ -26,7 +26,7 @@ Implement Test-Driven Development workflow with specialized agents and mandatory
 
 #### Phase 1: Test Development
 
-**Primary Agent**: `Rails Testing Expert`
+**Primary Agent**: stack-matched testing expert (`dotnet-testing-expert` for .NET, `test-automator` otherwise)
 
 - Write comprehensive test cases BEFORE any implementation
 - Include unit tests, integration tests, and edge cases
@@ -55,7 +55,7 @@ Implement Test-Driven Development workflow with specialized agents and mandatory
 
 **Collaborative Agents**:
 
-- **Rails Developer**: Backend logic and API implementation
+- **Backend Developer** (`dotnet-developer` for .NET, `backend-developer` otherwise): Backend logic and API implementation
 - **Frontend Developer**: Client-side functionality and interactions
 - **UI/UX Designer**: Interface consistency and user experience
 
@@ -77,7 +77,7 @@ Implement Test-Driven Development workflow with specialized agents and mandatory
 - All tests must pass before considering task complete
 - Code coverage should meet project standards (e.g., >80%)
 - No implementation without corresponding tests
-- Rails Testing Expert has final approval on test quality
+- The Phase 1 testing expert agent has final approval on test quality
 
 ### Workflow Rules
 
