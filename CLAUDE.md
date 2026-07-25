@@ -1,6 +1,6 @@
 # Global Preferences
 
-<!-- last audited 2026-07-25; next review: 2027-01-03 或主檔 > 150 行（拆 path-scoped rule）；> 200 行重構整體 -->
+<!-- last audited 2026-07-25（Claude 5 context-engineering 對齊：刪 dev-workflow SKILL.md 已覆蓋的路由複述）；next review: 2027-01-03 或主檔 > 150 行（拆 path-scoped rule）；> 200 行重構整體 -->
 <!-- 三 tier 正本在 ~/.agents/core（claude,codex,copilot 共用），經 ~/.claude/core symlink @import 常駐載入 -->
 <!-- 本檔只放「Claude 專屬且必須常駐」的判斷；細則走 skill / 文末 @import 漸進揭露。routing stamp 由 agents-sync 機械刷新，勿手改 -->
 @~/.claude/core/tier0-safety.md
@@ -15,18 +15,10 @@
 ## Tooling 優先序
 - 文件查詢優先 MCP > web search；Microsoft / Azure / .NET → microsoft-learn（Context7 的觸發條件由其 MCP server instructions 自帶，勿再複述）
 
-## Skill Routing（Claude 專屬層；通用路由與 stack →`*-best-practices` 見文末 routing stamp，不重複）
-- **Workflow（mp-* 為 escalation 不是 default）**：
-  - Bug / debug → default `superpowers:systematic-debugging`；重現率 < 50% / flaky / 效能 regression 找不到根因才 escalate `mp-diagnose`；修復完成後知識沉澱收尾 → `bug-fix-settlement`
-  - TDD / red-green-refactor → default `superpowers:test-driven-development`；user 指名 vertical-slice tracer bullet 才升 `mp-tdd`
-  - Architecture / refactor / testability 改善 → `mp-improve-codebase-architecture`；變更後收尾 `code-simplifier` agent（注意：依賴專案 CLAUDE.md 的 stack coding standards，缺則會 fallback 內建 JS/React 慣例、對其他 stack 套錯標準且不警告）
-  - Code review → 流程走 `superpowers:requesting-code-review`（dispatch 一個 `general-purpose` reviewer subagent + 套 `code-reviewer.md` 模板給乾淨 context，回饋接 `receiving-code-review`）；需 stack 專精深審時改 dispatch 對應 agent（.NET → `dotnet-code-reviewer`，其餘 → `code-reviewer`），與前者擇一非並用。審查優先序 / conventional comments 正本 = dev-workflow `reviewer-template.md`，PR body 自審 = `ledgers.md` Preflight
-  - 進陌生 code area 需 system map → `/mp-zoom-out`（無 `CONTEXT.md` / domain glossary 時自動降級為泛用詞彙描述）
-  - 架構視覺化：default = `docs/codebase/ARCHITECTURE.md` 內嵌 mermaid（`design-doc-mermaid` 產）；互動 HTML 僅 opt-in 提議（複雜狀態機 / 非技術 stakeholder / 長生命週期才提）；rot 守護與勿手改衍生圖正本見 dev-workflow S6
-  - 需求釐清 → 計畫 → 實作 鏈：`mp-grill-with-docs` 拷問細節、邊談邊產出 / 更新 `CONTEXT.md` + ADR（lazily 建，非前提）→ `superpowers:brainstorming` 探索 approach + 產 design spec（`docs/superpowers/specs/`；其 terminal state 強制接 writing-plans，勿 invoke 其他 skill）→ `superpowers:writing-plans` 產實作計畫 doc（`docs/superpowers/plans/`，bite-sized task 已內嵌 TDD 紅綠循環）→ 實作驅動 `superpowers:executing-plans`（inline 批次 + checkpoint）或 `superpowers:subagent-driven-development`（每 task 開新 subagent + 兩段審查）
-  - doc 分工互補非重複：`CONTEXT.md` + `docs/adr/` = 領域語言 / 決策；`specs/` = 設計；`plans/` = 執行步驟
+## Skill Routing（只放 dev-workflow SKILL.md 未覆蓋的 Claude 專屬條目；覆蓋到的一律不在此複述）
+- **Workflow default（mp-* 為 escalation 不是 default）**：Bug / debug → `superpowers:systematic-debugging`；TDD / red-green-refactor → `superpowers:test-driven-development`（user 指名 vertical-slice tracer bullet 才升 `mp-tdd`）；Architecture / refactor / testability 改善 → `mp-improve-codebase-architecture`；進陌生 code area 需 system map → `/mp-zoom-out`（無 `CONTEXT.md` / domain glossary 時自動降級為泛用詞彙描述）。S0–S6 階段、escalation 條件、review dispatch 與 reviewer-template、doc 分工（CONTEXT/specs/plans）、架構視覺化、bug-fix-settlement 收尾一律照 dev-workflow SKILL.md 當場讀取。
 - **CI gate**：repo 託管 GitHub 且無 `.github/workflows/` 時，首次開 PR 前主動提議加 CI workflow（至少 build + test，依 stack 與目標平台選 runner / matrix）；同意後加在「會進目標分支的 branch」（既有開著的 PR 須加在其 head 分支才觸發）。既有 CI 不主動重寫。
-- **瀏覽器 / E2E 工具分工**（互補不互斥）：探索式互動 + 生成測試骨架 → `agent-browser`；E2E 回歸測試固化進 CI → Playwright；效能 / 偵錯 → Chrome DevTools MCP；前端實作後 UI/UX 視覺品質審查 → `uiux-reviewer` agent
+- **瀏覽器 / E2E 工具分工**（互補不互斥）：探索式互動 + 生成測試骨架 → `agent-browser`；E2E 回歸固化進 CI → Playwright；效能 / 偵錯 → Chrome DevTools MCP；前端 UI/UX 視覺審查 → `uiux-reviewer` agent
 
 ## Security
 - Secrets：env var 或 secret manager；提供 `.env.example`（只 key name）；遮罩與禁印規則見 [T0-4]
@@ -38,9 +30,9 @@
 - Subagent 平行探索限「單一目標 + 結構化交付物」；跨檔重構別拆
 - [R-4] Ponytail（plugin 注入的 lazy prose）只約束「解法規模」（最小可行實作），MUST NOT 凌駕 tier0 / [R-1] / [R-2] gates；review / verify / debug 類 subagent 的徹底性不受其約束。觸發：ponytail prose 與任一 gate 或審查深度衝突。驗證：gate 產物齊全才放行。例外：無。
 
-## Self-Maintenance（Boris 原則：Claude 做錯就加進 CLAUDE.md）
-- **MUST** 同錯第二次發生 → 主動提議加進對應 CLAUDE.md / rules（用戶確認後再寫）；只記「為何」+「下次如何避免」
-- 學到教訓：專案特定 → `tasks/lessons.md`（隨 git）；跨專案 → auto memory 或本檔
+## Self-Maintenance（同錯第二次 → 沉澱；規則進常駐層，教訓進 auto memory）
+- **MUST** 同錯第二次發生 → 主動提議把「規則／約束」加進對應 CLAUDE.md / rules（用戶確認後再寫）；只記「為何」+「下次如何避免」。規則需常駐才有攔截力故留本檔；純教訓／事實不留本檔，走下一條
+- 學到教訓：專案特定 → `tasks/lessons.md`（隨 git）；跨專案 → auto memory（單一落點，勿寫回本檔）
 - 沉澱前評估「能否機械化」：預防檢查可寫成 hook / test / lint 者，考慮落地為機械守護（如 hookify）取代 prose；判斷類知識才寫 prose
 
 ## Git Preferences（commit 格式 / force-push / reproducible commit 見 [T2-2] [T0-3] [T1-3]）
