@@ -1,0 +1,1 @@
+../../.agents/core/tier0-safety.md

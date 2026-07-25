@@ -1,0 +1,1 @@
+../../.agents/core/tier2-style.md
