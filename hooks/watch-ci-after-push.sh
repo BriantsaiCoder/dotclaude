@@ -6,10 +6,15 @@
 # 只注入提醒、不阻擋工具流程；非 push/PR 指令安靜結束（無輸出、exit 0）。
 # stdin 為 PostToolUse 的 JSON，取 .tool_input.command 比對；用 grep 而非 if 條件鎖前綴，
 # 以便涵蓋複合指令（例如 `git add . && git push`）。
+#
+# 比對前先剝除引號內的字面字串：只有「執行」push/PR 才該提醒，「提及」不該——
+# 例如 `git commit -m "prep for git push"` 或 `grep 'git push' hooks/` 都只是字面出現。
+# 詞界用 shell 分隔字元對稱鎖住頭尾，避免 mygit push / git pushd 之類誤命中。
 
 cmd=$(jq -r '.tool_input.command // ""' 2>/dev/null)
+stripped=$(printf '%s' "$cmd" | sed -e "s/'[^']*'//g" -e 's/"[^"]*"//g')
 
-if printf '%s' "$cmd" | grep -Eq 'gh pr create|git push'; then
+if printf '%s' "$stripped" | grep -Eq '(^|[;&|(]|[[:space:]])(git[[:space:]]+push|gh[[:space:]]+pr[[:space:]]+create)([[:space:];&|)]|$)'; then
   jq -n '{
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
