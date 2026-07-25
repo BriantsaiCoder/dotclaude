@@ -1,8 +1,8 @@
 # Global Preferences
 
-<!-- last audited 2026-07-08; next review: 2027-01-03 或主檔 > 150 行（拆 path-scoped rule）；> 200 行重構整體 -->
-<!-- 安全／工作流／風格三 tier 常駐規則正本在 ~/.agents/core（三家共用單一真實來源），經 ~/.claude/core symlink 以下方 @import 常駐載入；原「優先序／Hard Rules／Workflow Playbooks」已遷正本（tier0 裁決鏈＋T0-x／dev-workflow skill），此處不再複述 -->
-<!-- routing 見文末 stamp 區塊；技術棧細則見文末附錄按需 @import -->
+<!-- last audited 2026-07-25; next review: 2027-01-03 或主檔 > 150 行（拆 path-scoped rule）；> 200 行重構整體 -->
+<!-- 三 tier 正本在 ~/.agents/core（claude,codex,copilot 共用），經 ~/.claude/core symlink @import 常駐載入 -->
+<!-- 本檔只放「Claude 專屬且必須常駐」的判斷；細則走 skill / 文末 @import 漸進揭露。routing stamp 由 agents-sync 機械刷新，勿手改 -->
 @~/.claude/core/tier0-safety.md
 @~/.claude/core/tier1-workflow.md
 @~/.claude/core/tier2-style.md
@@ -13,14 +13,14 @@
 - macOS case-insensitive FS：改檔名大小寫用 `git mv`
 
 ## Tooling 優先序
-- 文件查詢優先 MCP > web search：library / framework → Context7；Microsoft / Azure / .NET → microsoft-learn
+- 文件查詢優先 MCP > web search；Microsoft / Azure / .NET → microsoft-learn（Context7 的觸發條件由其 MCP server instructions 自帶，勿再複述）
 
 ## Skill Routing（Claude 專屬層；通用路由與 stack →`*-best-practices` 見文末 routing stamp，不重複）
 - **Workflow（mp-* 為 escalation 不是 default）**：
   - Bug / debug → default `superpowers:systematic-debugging`；重現率 < 50% / flaky / 效能 regression 找不到根因才 escalate `mp-diagnose`；修復完成後知識沉澱收尾 → `bug-fix-settlement`
   - TDD / red-green-refactor → default `superpowers:test-driven-development`；user 指名 vertical-slice tracer bullet 才升 `mp-tdd`
   - Architecture / refactor / testability 改善 → `mp-improve-codebase-architecture`；變更後收尾 `code-simplifier` agent（注意：依賴專案 CLAUDE.md 的 stack coding standards，缺則會 fallback 內建 JS/React 慣例、對其他 stack 套錯標準且不警告）
-  - Code review → 流程走 `superpowers:requesting-code-review`（dispatch 一個 `general-purpose` reviewer subagent + 套 `code-reviewer.md` 模板給乾淨 context，回饋接 `receiving-code-review`）；需 stack 專精深審時改 dispatch 對應 agent（.NET → `dotnet-code-reviewer`，其餘 → `code-reviewer`），與前者擇一非並用
+  - Code review → 流程走 `superpowers:requesting-code-review`（dispatch 一個 `general-purpose` reviewer subagent + 套 `code-reviewer.md` 模板給乾淨 context，回饋接 `receiving-code-review`）；需 stack 專精深審時改 dispatch 對應 agent（.NET → `dotnet-code-reviewer`，其餘 → `code-reviewer`），與前者擇一非並用。審查優先序 / conventional comments 正本 = dev-workflow `reviewer-template.md`，PR body 自審 = `ledgers.md` Preflight
   - 進陌生 code area 需 system map → `/mp-zoom-out`（無 `CONTEXT.md` / domain glossary 時自動降級為泛用詞彙描述）
   - 架構視覺化：default = `docs/codebase/ARCHITECTURE.md` 內嵌 mermaid（`design-doc-mermaid` 產）；互動 HTML 僅 opt-in 提議（複雜狀態機 / 非技術 stakeholder / 長生命週期才提）；rot 守護與勿手改衍生圖正本見 dev-workflow S6
   - 需求釐清 → 計畫 → 實作 鏈：`mp-grill-with-docs` 拷問細節、邊談邊產出 / 更新 `CONTEXT.md` + ADR（lazily 建，非前提）→ `superpowers:brainstorming` 探索 approach + 產 design spec（`docs/superpowers/specs/`；其 terminal state 強制接 writing-plans，勿 invoke 其他 skill）→ `superpowers:writing-plans` 產實作計畫 doc（`docs/superpowers/plans/`，bite-sized task 已內嵌 TDD 紅綠循環）→ 實作驅動 `superpowers:executing-plans`（inline 批次 + checkpoint）或 `superpowers:subagent-driven-development`（每 task 開新 subagent + 兩段審查）
@@ -32,12 +32,11 @@
 - Secrets：env var 或 secret manager；提供 `.env.example`（只 key name）；遮罩與禁印規則見 [T0-4]
 
 ## Workflow（規則正本在 tier0-2 @import；此處只放 Claude 專屬補充）
-- 計畫格式 / 風險等級 / rollback 見 [T0-8] [T1-2]；選型優先序見 [T1-7]；風格沿用見 [T2-1]；dead code 見 [T1-6]；自我簡化見 dev-workflow S4
-- Push back：用戶需求有更簡單做法（[T1-7] 的層級可涵蓋時）→ 直說並建議 + 給 trade-off，不盲從複雜實作；但別把一般 implementation detail 擴成選項討論
+- Push back 判準：更簡單做法落在 [T1-7] 層級內才提（附 trade-off）；一般 implementation detail 不擴成選項討論
 - 新增外部套件前評估維護狀態、license、版本相容與專案既有 dependency policy（CVE 由 `dependency-security-scan` 把關）
 - 非 git repo 既有專案動手前先提議 `git init` + baseline commit（throwaway sandbox / 一次性 script 例外）
 - Subagent 平行探索限「單一目標 + 結構化交付物」；跨檔重構別拆
-- [R-4] Ponytail（plugin 注入的 lazy prose）只約束「解法規模」（最小可行實作），MUST NOT 凌駕 tier0 / R-1~R-3 gates；review / verify / debug 類 subagent 的徹底性不受其約束。觸發：ponytail prose 與任一 gate 或審查深度衝突。驗證：gate 產物齊全才放行。例外：無。
+- [R-4] Ponytail（plugin 注入的 lazy prose）只約束「解法規模」（最小可行實作），MUST NOT 凌駕 tier0 / [R-1] / [R-2] gates；review / verify / debug 類 subagent 的徹底性不受其約束。觸發：ponytail prose 與任一 gate 或審查深度衝突。驗證：gate 產物齊全才放行。例外：無。
 
 ## Self-Maintenance（Boris 原則：Claude 做錯就加進 CLAUDE.md）
 - **MUST** 同錯第二次發生 → 主動提議加進對應 CLAUDE.md / rules（用戶確認後再寫）；只記「為何」+「下次如何避免」
@@ -54,12 +53,10 @@
 - 觸發：完成邏輯單元（feature / fix / refactor / 套件安裝 / 設定變更 / 文件更新）主動 commit 無須問
 - 仍需用戶確認：main / master / 受保護分支、revert、邏輯混雜（提議拆）、累積 5+ 未 push 的自動 commit
 
-## Comment Policy（system override：本節覆蓋 Claude Code 系統 default no-comments；規則正本 [T2-3] [T2-4]）
+## Comment Policy（規則正本 [T2-4]）
 - 修改既有 code 同步更新註解；註解 rot 視同 bug
 
-## Code Review（優先序與 conventional comments 正本在 dev-workflow reviewer-template.md；PR body / diff 自審在 ledgers.md Preflight）
-
-## Verification（evidence 見 [T0-2]；baseline 見 [T1-4]；gate 選擇見 dev-workflow S4）
+## Verification（evidence [T0-2]；baseline [T1-4]）
 - 無法跑驗證時明確記錄原因＋事後可執行的補跑指令（含必要 env 前綴）
 - 任務轉成可驗證 goal：「修 bug」→「寫 reproduce test 並通過」、「加 validation」→「寫 invalid input test 並通過」、「refactor」→「修改前後 test 全綠」；goal 夠明確 → verify-loop 可獨立跑，模糊 → 回去補 goal
 - 不直接覆寫 production config
