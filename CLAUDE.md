@@ -64,7 +64,7 @@
 - Cookbook 知識庫（專案採用 `docs/cookbook/` 時）：`@~/.claude/rules/cookbook.md`
 - /compact 或 cross-session handoff：`@~/.claude/templates/compact.md`
 
-<!-- agents-routing:begin | generated-from: ~/.agents/core/routing.md | last-verified: 2026-07-25 -->
+<!-- agents-routing:begin | generated-from: ~/.agents/core/routing.md | last-verified: 2026-07-26 -->
 <!-- tier: 1 | consumed-by: claude,codex,copilot | generated-from: core/routing.md | last-verified: 2026-07-13 -->
 <!-- FP:ROUTING-2026Q3 -->
 
