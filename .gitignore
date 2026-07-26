@@ -26,6 +26,12 @@
 !skills/
 !skills/**
 
+# 追蹤目標：機械閘（CI workflow 與其測試；P3-8）
+!.github/
+!.github/**
+!tests/
+!tests/**
+
 # 追蹤目標：頂層設定
 !settings.json
 !statusline-command.sh

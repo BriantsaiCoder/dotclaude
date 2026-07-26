@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ~/.agents 不存在於本 repo 的 CI 環境，所以 63 個 symlink 全是斷鏈。
+      # 這是預期的：repo-integrity.sh 只驗 symlink 的「形狀」不驗目標存在，
+      # 因為形狀錯（絕對路徑、指到別的 kind、改名沒重連）才是會靜默換掉
+      # skill 內容的那一種失效。目標存在性由本機 `agents-sync --doctor` 負責。
+      - name: 安裝 shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+
+      - name: repo 完整性（JSON / symlink 形狀 / agent 定義 / routing stamp / shellcheck）
+        run: bash tests/repo-integrity.sh
+
+      # 這兩個 hook 是 [T0-3] force-push 防線的薄 wrapper，正本在 ~/.agents。
+      # 這裡只確認 wrapper 沒有退化成空殼或指錯正本路徑。
+      - name: guard-git-push wrapper 仍指向共用正本
+        run: |
+          set -euo pipefail
+          f=hooks/guard-git-push.sh
+          test -f "$f" || { echo "缺少 $f"; exit 1; }
+          grep -q '\.agents/hooks/guard-git-push\.sh' "$f" \
+            || { echo "$f 未引用 ~/.agents 的共用正本——防線可能已退化為本地副本"; exit 1; }
+          echo "OK: $f 引用共用正本"
