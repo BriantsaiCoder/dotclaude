@@ -16,7 +16,7 @@
 - 文件查詢優先 MCP > web search；Microsoft / Azure / .NET → microsoft-learn（Context7 的觸發條件由其 MCP server instructions 自帶，勿再複述）
 
 ## Skill Routing（只放 dev-workflow SKILL.md 未覆蓋的 Claude 專屬條目；覆蓋到的一律不在此複述）
-- **Workflow default（mp-* 為 escalation 不是 default）**：Bug / debug → `superpowers:systematic-debugging`；TDD / red-green-refactor → `superpowers:test-driven-development`（user 指名 vertical-slice tracer bullet 才升 `mp-tdd`）；Architecture / refactor / testability 改善 → `mp-improve-codebase-architecture`；進陌生 code area 需 system map → `/mp-zoom-out`（無 `CONTEXT.md` / domain glossary 時自動降級為泛用詞彙描述）。S0–S6 階段、escalation 條件、review dispatch 與 reviewer-template、doc 分工（CONTEXT/specs/plans）、架構視覺化、bug-fix-settlement 收尾一律照 dev-workflow SKILL.md 當場讀取。
+- **Workflow default**：開發任務的 skill routing 以 dev-workflow 當場讀取結果與下方 managed routing stamp 為準；本段不重複跨主機 skill mapping。
 - **CI gate**：repo 託管 GitHub 且無 `.github/workflows/` 時，首次開 PR 前主動提議加 CI workflow（至少 build + test，依 stack 與目標平台選 runner / matrix）；同意後加在「會進目標分支的 branch」（既有開著的 PR 須加在其 head 分支才觸發）。既有 CI 不主動重寫。
 - **瀏覽器 / E2E 工具分工**（互補不互斥）：探索式互動 + 生成測試骨架 → `agent-browser`；E2E 回歸固化進 CI → Playwright；效能 / 偵錯 → Chrome DevTools MCP；前端 UI/UX 視覺審查 → `uiux-reviewer` agent
 
