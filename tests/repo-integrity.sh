@@ -97,13 +97,26 @@ for dir in core rules hooks; do
   fi
 done
 
+shared_skills="${SHARED_SKILLS_ROOT:-$HOME/.agents/skills}"
 skill_bad=0
-while IFS= read -r f; do
-  target=$(readlink "$f") || { bad "無法讀取 skill symlink: $f"; skill_bad=$((skill_bad+1)); continue; }
-  expect="../../.agents/skills/$(basename "$f")"
-  [ "$target" = "$expect" ] || { bad "skill target 不符: $f"; skill_bad=$((skill_bad+1)); }
-done < <(find skills -maxdepth 1 -type l | LC_ALL=C sort)
-[ "$skill_bad" -eq 0 ] && ok "shared skill symlink targets 保持不變"
+while IFS= read -r source; do
+  name=$(basename "$source")
+  link="skills/$name"
+  if [ ! -L "$link" ]; then
+    bad "Claude skill link 缺失: $name"
+    skill_bad=$((skill_bad+1))
+  elif [ "$(readlink "$link")" != "../../.agents/skills/$name" ]; then
+    bad "Claude skill target 不符: $name"
+    skill_bad=$((skill_bad+1))
+  fi
+done < <(find "$shared_skills" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
+while IFS= read -r link; do
+  [ -d "$shared_skills/$(basename "$link")" ] || {
+    bad "Claude skill link 無 shared source: $link"
+    skill_bad=$((skill_bad+1))
+  }
+done < <(find skills -mindepth 1 -maxdepth 1 -type l | LC_ALL=C sort)
+[ "$skill_bad" -eq 0 ] && ok "Claude skill links 與 shared source exact"
 
 if rg -q '\.agents/(core|rules|hooks)(/|`|$)' CLAUDE.md settings.json; then
   bad "active config 仍引用 .agents control plane"
@@ -124,6 +137,36 @@ if jq -e '
   ok "SessionStart 使用 Claude-local drift check"
 else
   bad "SessionStart 未使用 Claude-local drift check"
+fi
+
+# ── 6. Matt thin kernel ────────────────────────────────────────
+if [ "$(wc -c < CLAUDE.md | tr -d ' ')" -le 5000 ]; then
+  ok "CLAUDE.md thin budget <= 5000B"
+else
+  bad "CLAUDE.md 超過 thin budget"
+fi
+
+if rg -q '^@~/.claude/core/tier0-safety\.md$' CLAUDE.md &&
+   ! rg -q '^@~/.claude/core/tier[12]-' CLAUDE.md; then
+  ok "只常駐載入 Claude-local tier0"
+else
+  bad "Claude core import 尚未 thin"
+fi
+
+for marker in dev-workflow S4 S5 S6 grilling domain-modeling implement tdd diagnosing-bugs code-review codebase-design; do
+  rg -q "$marker" CLAUDE.md || bad "CLAUDE.md thin route 缺失: $marker"
+done
+
+if rg -q 'superpowers:|mp-(diagnose|grill-with-docs|improve-codebase-architecture|tdd)' CLAUDE.md; then
+  bad "CLAUDE.md 仍引用 legacy workflow"
+else
+  ok "CLAUDE.md legacy workflow refs = 0"
+fi
+
+if jq -e '.enabledPlugins["superpowers@superpowers-marketplace"] == false' settings.json >/dev/null; then
+  ok "Superpowers registration 在 candidate 明確 disabled"
+else
+  bad "Superpowers registration 尚未 disabled"
 fi
 
 printf '\n%d PASS / %d FAIL\n' "$pass" "$fail"
