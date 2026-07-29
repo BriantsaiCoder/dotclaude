@@ -6,10 +6,10 @@
 # 會噴錯的東西不需要 CI 擋，會靜默失效的才需要。
 #
 #   1. JSON 解析     settings.json 壞掉時整份被靜默忽略，不是報錯
-#   2. symlink 形狀  斷鏈或指錯 kind 會讓 skill/rule 內容靜默換掉或消失
+#   2. skill symlink 斷鏈或指錯位置會讓共用 skill 靜默換掉或消失
 #   3. agent 定義    frontmatter 有 name 但缺 description 的檔案永遠不會載入
-#   4. routing stamp 標記殘缺會讓 agents-sync 無法定位注入區塊
-#   5. shellcheck    hook 是 PreToolUse 攔截器，語法錯等於防線失效
+#   4. shellcheck    hook 是 PreToolUse 攔截器，語法錯等於防線失效
+#   5. ownership     非 skill config 不可重新連回 ~/.agents control plane
 #
 # 用法: bash tests/repo-integrity.sh
 # 從 repo 根目錄跑；CI 與本機皆可。
@@ -39,21 +39,21 @@ if [ -f settings.json ]; then
   esac
 fi
 
-# ── 2. symlink 形狀 ────────────────────────────────────────────
-# 不變量：每個 symlink 必為 ../../.agents/<所在目錄>/<與自己同名>。
+# ── 2. skill symlink 形狀 ─────────────────────────────────────
+# 不變量：每個 symlink 必為 ../../.agents/skills/<與自己同名>。
 # CI 環境沒有 ~/.agents，所以只驗形狀不驗目標存在——形狀錯才是會靜默
-# 換掉內容的那一種（絕對路徑、指到別的 kind、改名後沒重連）。
+# 換掉內容的那一種（絕對路徑、指到別的 skill、改名後沒重連）。
 link_n=0; link_bad=0
 while IFS= read -r f; do
   link_n=$((link_n+1))
   target=$(readlink "$f") || { bad "無法讀取 symlink: $f"; link_bad=$((link_bad+1)); continue; }
-  expect="../../.agents/$(dirname "$f")/$(basename "$f")"
+  expect="../../.agents/skills/$(basename "$f")"
   if [ "$target" = "$expect" ]; then :
   else bad "symlink 目標不符: $f -> ${target}（應為 ${expect}）"; link_bad=$((link_bad+1)); fi
-done < <(git ls-files -s | awk '$1=="120000"{ $1=""; $2=""; $3=""; sub(/^ +/,""); print }')
+done < <(find skills -maxdepth 1 -type l | LC_ALL=C sort)
 # 只有零失敗才宣稱一致——否則摘要會與上方剛印的 FAIL 自相矛盾
 if [ "$link_n" -gt 0 ] && [ "$link_bad" -eq 0 ]; then
-  ok "symlink 形狀一致: $link_n 個全部為 ../../.agents/<kind>/<同名>"
+  ok "skill symlink 形狀一致: $link_n 個全部為 ../../.agents/skills/<同名>"
 fi
 
 # ── 3. agent 定義可載入 ────────────────────────────────────────
@@ -76,21 +76,7 @@ while IFS= read -r f; do
   esac
 done < <(git ls-files 'agents/*.md')
 
-# ── 4. CLAUDE.md 的 routing stamp 標記完整 ─────────────────────
-# agents-sync 靠這對標記定位注入區塊；殘缺時它會拒絕寫入或寫錯位置。
-if [ -f CLAUDE.md ]; then
-  b=$(grep -c '<!-- agents-routing:begin' CLAUDE.md)
-  e=$(grep -c '<!-- agents-routing:end' CLAUDE.md)
-  bl=$(grep -n '<!-- agents-routing:begin' CLAUDE.md | head -1 | cut -d: -f1)
-  el=$(grep -n '<!-- agents-routing:end'   CLAUDE.md | head -1 | cut -d: -f1)
-  if [ "$b" = 1 ] && [ "$e" = 1 ] && [ -n "$bl" ] && [ -n "$el" ] && [ "$bl" -lt "$el" ]; then
-    ok "routing stamp 標記完整（begin@$bl < end@${el}）"
-  else
-    bad "routing stamp 標記殘缺: begin×$b end×${e}（各須恰好 1 個且 begin 在前）"
-  fi
-fi
-
-# ── 5. shellcheck ─────────────────────────────────────────────
+# ── 4. shellcheck ─────────────────────────────────────────────
 # 只檢查本 repo 自己的實體 .sh；symlink 進來的由 ~/.agents 的 CI 負責。
 if command -v shellcheck >/dev/null 2>&1; then
   sh_files=()
@@ -100,6 +86,90 @@ if command -v shellcheck >/dev/null 2>&1; then
   else bad "shellcheck 發現 error 級問題"; fi
 else
   printf '  SKIP  shellcheck 未安裝\n'
+fi
+
+# ── 5. global config ownership ────────────────────────────────
+for dir in core rules hooks; do
+  if find "$dir" -maxdepth 1 -type l -print -quit | grep -q .; then
+    bad "$dir 仍含非 skill symlink"
+  else
+    ok "$dir 由 Claude repo 擁有"
+  fi
+done
+
+shared_skills="${SHARED_SKILLS_ROOT:-$HOME/.agents/skills}"
+skill_bad=0
+while IFS= read -r source; do
+  name=$(basename "$source")
+  link="skills/$name"
+  if [ ! -L "$link" ]; then
+    bad "Claude skill link 缺失: $name"
+    skill_bad=$((skill_bad+1))
+  elif [ "$(readlink "$link")" != "../../.agents/skills/$name" ]; then
+    bad "Claude skill target 不符: $name"
+    skill_bad=$((skill_bad+1))
+  fi
+done < <(
+  find "$shared_skills" -mindepth 1 -maxdepth 1 -type d \
+    ! -path "$shared_skills/.claude" | LC_ALL=C sort
+)
+while IFS= read -r link; do
+  [ -d "$shared_skills/$(basename "$link")" ] || {
+    bad "Claude skill link 無 shared source: $link"
+    skill_bad=$((skill_bad+1))
+  }
+done < <(find skills -mindepth 1 -maxdepth 1 -type l | LC_ALL=C sort)
+[ "$skill_bad" -eq 0 ] && ok "Claude skill links 與 shared source exact"
+
+if rg -q '\.agents/(core|rules|hooks)(/|`|$)' CLAUDE.md settings.json; then
+  bad "active config 仍引用 .agents control plane"
+else
+  ok "active config 的 .agents refs 僅限 skills"
+fi
+
+if rg -q '<!-- agents-routing:(begin|end)' CLAUDE.md; then
+  bad "CLAUDE.md 仍受 routing stamp generator 管理"
+else
+  ok "CLAUDE.md routing 已由 Claude repo 擁有"
+fi
+
+if jq -e '
+  .hooks.SessionStart[]?.hooks[]?
+  | select(.command == "bash ~/.claude/hooks/drift-check.sh")
+' settings.json >/dev/null; then
+  ok "SessionStart 使用 Claude-local drift check"
+else
+  bad "SessionStart 未使用 Claude-local drift check"
+fi
+
+# ── 6. Matt thin kernel ────────────────────────────────────────
+if [ "$(wc -c < CLAUDE.md | tr -d ' ')" -le 5000 ]; then
+  ok "CLAUDE.md thin budget <= 5000B"
+else
+  bad "CLAUDE.md 超過 thin budget"
+fi
+
+if rg -q '^@~/.claude/core/tier0-safety\.md$' CLAUDE.md &&
+   ! rg -q '^@~/.claude/core/tier[12]-' CLAUDE.md; then
+  ok "只常駐載入 Claude-local tier0"
+else
+  bad "Claude core import 尚未 thin"
+fi
+
+for marker in dev-workflow S4 S5 S6 grilling domain-modeling implement tdd diagnosing-bugs code-review codebase-design; do
+  rg -q "$marker" CLAUDE.md || bad "CLAUDE.md thin route 缺失: $marker"
+done
+
+if rg -q 'superpowers:|mp-(diagnose|grill-with-docs|improve-codebase-architecture|tdd)' CLAUDE.md; then
+  bad "CLAUDE.md 仍引用 legacy workflow"
+else
+  ok "CLAUDE.md legacy workflow refs = 0"
+fi
+
+if jq -e '.enabledPlugins["superpowers@superpowers-marketplace"] == false' settings.json >/dev/null; then
+  ok "Superpowers registration 在 candidate 明確 disabled"
+else
+  bad "Superpowers registration 尚未 disabled"
 fi
 
 printf '\n%d PASS / %d FAIL\n' "$pass" "$fail"
