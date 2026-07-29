@@ -1,4 +1,4 @@
-<!-- tier: 2 | consumed-by: claude,codex,copilot | generated-from: core/tier2-style.md | last-verified: 2026-07-29 -->
+<!-- tier: 2 | consumed-by: claude,codex,copilot | last-verified: 2026-07-30 -->
 <!-- FP:STYLE-T2-2026Q3 -->
 
 # tier2 風格（host 間差異可接受；只靠 git diff 巡檢，發現實害才升 tier）

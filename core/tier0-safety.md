@@ -1,4 +1,4 @@
-<!-- tier: 0 | consumed-by: claude,codex,copilot | generated-from: core/tier0-safety.md | last-verified: 2026-07-13 -->
+<!-- tier: 0 | consumed-by: claude,codex,copilot | last-verified: 2026-07-30 -->
 <!-- FP:AGENTS-T0-2026Q3 -->
 
 # tier0 安全紅線（三家 100% 常駐；違反屬 bug）
