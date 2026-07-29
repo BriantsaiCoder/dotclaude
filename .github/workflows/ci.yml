@@ -24,13 +24,18 @@ jobs:
       - name: repo 完整性（JSON / symlink 形狀 / agent 定義 / routing stamp / shellcheck）
         run: bash tests/repo-integrity.sh
 
-      # 這兩個 hook 是 [T0-3] force-push 防線的薄 wrapper，正本在 ~/.agents。
-      # 這裡只確認 wrapper 沒有退化成空殼或指錯正本路徑。
-      - name: guard-git-push wrapper 仍指向共用正本
+      # 這個 hook 是 [T0-3] force-push 防線的完整實作。2026-07-29 三家 config
+      # 分離後它不再是指向 ~/.agents 的 wrapper——repo-integrity.sh 第 5 節反過來
+      # 禁止 hooks/ 出現 symlink，所以本 repo 擁有自己那一份。
+      # CI 環境沒有 ~/.agents，無法比對三份副本是否一致；那由本機
+      # ~/.agents/hooks/drift-check.sh 的 parity 檢查負責（SessionStart 觸發）。
+      # 這裡只確認防線沒有退化成空殼或壞語法。
+      - name: guard-git-push 防線未退化
         run: |
           set -euo pipefail
           f=hooks/guard-git-push.sh
           test -f "$f" || { echo "缺少 $f"; exit 1; }
-          grep -q '\.agents/hooks/guard-git-push\.sh' "$f" \
-            || { echo "$f 未引用 ~/.agents 的共用正本——防線可能已退化為本地副本"; exit 1; }
-          echo "OK: $f 引用共用正本"
+          grep -q '\[T0-3\]' "$f" \
+            || { echo "$f 未標示 [T0-3]——可能已被非防線腳本取代"; exit 1; }
+          bash -n "$f" || { echo "$f 語法錯誤"; exit 1; }
+          echo "OK: $f 存在、標示 [T0-3]、語法正確"
