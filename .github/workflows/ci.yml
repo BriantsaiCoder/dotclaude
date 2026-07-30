@@ -30,12 +30,18 @@ jobs:
       # CI 環境沒有 ~/.agents，無法比對三份副本是否一致；那由本機
       # ~/.agents/hooks/drift-check.sh 的 parity 檢查負責（SessionStart 觸發）。
       # 這裡只確認防線沒有退化成空殼或壞語法。
+      # 錨點選判定變數而非註解標記：只驗 '[T0-3]' 的話，一個
+      # `# [T0-3]` + `exit 0` 的空殼也會 PASS——探針就偵測不到它自稱偵測的退化。
+      # has_force / broad_refset 是實際判定 force 變體與 --all/--mirror 的變數，
+      # main|master 是保護分支判定；三者任一消失都代表防線真的被換掉了。
       - name: guard-git-push 防線未退化
         run: |
           set -euo pipefail
           f=hooks/guard-git-push.sh
           test -f "$f" || { echo "缺少 $f"; exit 1; }
-          grep -q '\[T0-3\]' "$f" \
-            || { echo "$f 未標示 [T0-3]——可能已被非防線腳本取代"; exit 1; }
+          for anchor in '\[T0-3\]' 'has_force' 'broad_refset' 'main|master'; do
+            grep -q "$anchor" "$f" \
+              || { echo "$f 缺少判定錨點 $anchor——防線可能已被空殼取代"; exit 1; }
+          done
           bash -n "$f" || { echo "$f 語法錯誤"; exit 1; }
-          echo "OK: $f 存在、標示 [T0-3]、語法正確"
+          echo "OK: $f 存在、四個判定錨點齊備、語法正確"
