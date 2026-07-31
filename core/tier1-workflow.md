@@ -1,4 +1,4 @@
-<!-- tier: 1 | consumed-by: claude,codex,copilot | last-verified: 2026-07-30 -->
+<!-- tier: 1 | consumed-by: claude | last-verified: 2026-08-01 -->
 <!-- FP:WORKFLOW-T1-2026Q3 -->
 
 # tier1 工作流紀律（容忍一個 session 延遲；正本規則見 dev-workflow skill）
