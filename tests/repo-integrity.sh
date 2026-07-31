@@ -97,29 +97,37 @@ for dir in core rules hooks; do
   fi
 done
 
+# 這一節比對 link 與 shared source 是否一一對應，只有 ~/.agents 在場時成立。
+# CI 環境沒有 ~/.agents（見 .github/workflows/ci.yml 的分工說明）：那裡只驗 symlink
+# 形狀（第 43-56 行），目標存在性由本機 `agents-sync --doctor` 負責。缺這道守衛時
+# 94 條 link 會全數誤判 FAIL——2026-08-01 run 30671830610 實證。
 shared_skills="${SHARED_SKILLS_ROOT:-$HOME/.agents/skills}"
-skill_bad=0
-while IFS= read -r source; do
-  name=$(basename "$source")
-  link="skills/$name"
-  if [ ! -L "$link" ]; then
-    bad "Claude skill link 缺失: $name"
-    skill_bad=$((skill_bad+1))
-  elif [ "$(readlink "$link")" != "../../.agents/skills/$name" ]; then
-    bad "Claude skill target 不符: $name"
-    skill_bad=$((skill_bad+1))
-  fi
-done < <(
-  find "$shared_skills" -mindepth 1 -maxdepth 1 -type d \
-    ! -path "$shared_skills/.claude" | LC_ALL=C sort
-)
-while IFS= read -r link; do
-  [ -d "$shared_skills/$(basename "$link")" ] || {
-    bad "Claude skill link 無 shared source: $link"
-    skill_bad=$((skill_bad+1))
-  }
-done < <(find skills -mindepth 1 -maxdepth 1 -type l | LC_ALL=C sort)
-[ "$skill_bad" -eq 0 ] && ok "Claude skill links 與 shared source exact"
+if [ ! -d "$shared_skills" ]; then
+  printf '  SKIP  shared source 不可得（%s）；link 目標存在性由本機 agents-sync --doctor 負責\n' "$shared_skills"
+else
+  skill_bad=0
+  while IFS= read -r source; do
+    name=$(basename "$source")
+    link="skills/$name"
+    if [ ! -L "$link" ]; then
+      bad "Claude skill link 缺失: $name"
+      skill_bad=$((skill_bad+1))
+    elif [ "$(readlink "$link")" != "../../.agents/skills/$name" ]; then
+      bad "Claude skill target 不符: $name"
+      skill_bad=$((skill_bad+1))
+    fi
+  done < <(
+    find "$shared_skills" -mindepth 1 -maxdepth 1 -type d \
+      ! -path "$shared_skills/.claude" | LC_ALL=C sort
+  )
+  while IFS= read -r link; do
+    [ -d "$shared_skills/$(basename "$link")" ] || {
+      bad "Claude skill link 無 shared source: $link"
+      skill_bad=$((skill_bad+1))
+    }
+  done < <(find skills -mindepth 1 -maxdepth 1 -type l | LC_ALL=C sort)
+  [ "$skill_bad" -eq 0 ] && ok "Claude skill links 與 shared source exact"
+fi
 
 if rg -q '\.agents/(core|rules|hooks)(/|`|$)' CLAUDE.md settings.json; then
   bad "active config 仍引用 .agents control plane"
