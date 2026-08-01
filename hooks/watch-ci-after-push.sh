@@ -39,6 +39,12 @@ if [ "${1:-}" = "--selftest" ]; then
       *"下一步："*) ;;
       *) printf '  FAIL  %s：未產生下一步指引\n' "$st"; fail=$((fail+1)); continue ;;
     esac
+    # 耗時行必須每次都在。它是判斷「離 timeout 還有多少餘裕」的唯一訊號，而超時的表現是
+    # hook 靜默無輸出——沒有這行，等發現時已經漏掉一次 gate 了。
+    case "$got" in
+      *"hook 端到端耗時"*) ;;
+      *) printf '  FAIL  %s：未附上耗時\n' "$st"; fail=$((fail+1)); continue ;;
+    esac
     # 只有 PASS 可以說「可進入 merge 決策」；其餘一律不得出現該字串。
     if [ "$st" = PASS ]; then
       case "$got" in *"可進入 merge 決策"*) printf '  PASS  %s\n' "$st"; pass=$((pass+1)) ;;
@@ -53,6 +59,12 @@ if [ "${1:-}" = "--selftest" ]; then
   exit $?
 fi
 
+# 自報耗時。settings.json 給這支 hook 30 秒；分項加總估過完整 gate 路徑約 3.4 秒，但那是把各支
+# API 的單獨耗時相加，不是一次真實 push 的端到端數字。與其記著「下次開 PR 時去量」，不如每次
+# 都自己量並印出來——超時的表現是 hook 靜默無輸出，等發現時已經漏掉一次 gate。
+# date +%s%N 在 macOS 的 BSD date 上不支援（會印出字面 N），所以取秒級並標示精度，不假裝有毫秒。
+HOOK_T0=$(date +%s)
+
 payload=$(cat)
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null)
 hook_cwd=$(printf '%s' "$payload" | jq -r '.cwd // ""' 2>/dev/null)
@@ -62,7 +74,13 @@ printf '%s' "$stripped" |
   grep -Eq '(^|[;&|(]|[[:space:]])(git[[:space:]]+push|gh[[:space:]]+pr[[:space:]]+create)([[:space:];&|)]|$)' ||
   exit 0
 
-emit() { jq -n --arg c "$1" '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:$c}}'; exit 0; }
+emit() {
+  local secs=$(( $(date +%s) - HOOK_T0 ))
+  jq -n --arg c "$1" --arg t "$secs" \
+    '{hookSpecificOutput:{hookEventName:"PostToolUse",
+      additionalContext:($c + "\n\n[hook 端到端耗時 " + $t + "s／timeout 30s，秒級精度]")}}'
+  exit 0
+}
 
 FALLBACK='[全域設定] 偵測到 git push / gh pr create，但自動 merge gate 無法執行（原因見下）。請手動：對該 PR 跑 `~/.agents/bin/pr-review-gate <n>`，並依 STATE 處置。【Merge gate】squash-merge 前除 CI 綠燈外，另須查 Copilot / bot review——它是 COMMENTED state、不計入 `gh pr checks`，只看 CI 會漏接。'
 
