@@ -2,15 +2,16 @@
 #
 # repo-integrity.sh — ~/.claude 的機械守衛（P3-8）
 #
-# 為什麼是這六項：每一項都對應一種「壞掉但不會有錯誤訊息」的失效模式。
-# 會噴錯的東西不需要 CI 擋，會靜默失效的才需要。
+# 為什麼是這七項：每一項都對應一種「壞掉但不會有錯誤訊息」的失效模式。
+# 會噴錯的東西不需要 CI 擋，會靜默失效的才需要。編號與內文 section 一一對應。
 #
 #   1. JSON 解析     settings.json 壞掉時整份被靜默忽略，不是報錯
 #   2. skill symlink 斷鏈或指錯位置會讓共用 skill 靜默換掉或消失
 #   3. agent 定義    frontmatter 有 name 但缺 description 的檔案永遠不會載入
 #   4. shellcheck    hook 是 PreToolUse 攔截器，語法錯等於防線失效
 #   5. ownership     非 skill config 不可重新連回 ~/.agents control plane
-#   6. hook 行為     阻擋型 hook 讀不懂 payload 時放行，是無聲失去防線
+#   6. thin kernel   CLAUDE.md 的 budget／route／授權政策漂移不會有人察覺
+#   7. hook 行為     阻擋型 hook 讀不懂 payload 時放行，是無聲失去防線
 #
 # 用法: bash tests/repo-integrity.sh
 # 從 repo 根目錄跑；CI 與本機皆可。
@@ -198,7 +199,8 @@ if grep -q 'bash "\$HOME/\.agents/bin/hook-parity-check"' hooks/drift-check.sh 2
     bad "parity checker 呼叫缺 [ -x ] 守護——helper 缺檔時 SessionStart 會噴錯"
 fi
 
-# 6. 阻擋型 hook 在讀不懂 payload 時必須 fail-closed。
+# ── 7. 阻擋型 hook fail-closed ─────────────────────────────────
+#
 #
 # 這是行為檢查不是語法檢查：guard-cookbook-orphan.sh 的語法一直是對的，但解析器缺席
 # 或 payload 非法時 file_path 變空字串，而空字串直接 exit 0——守衛對整個缺 python3
