@@ -14,6 +14,7 @@
 - Package manager：npm（CI 用 `npm ci`）。
 - Runtime follow `global.json`／`.nvmrc`；無則取最新 LTS。
 - 文件查詢優先 MCP；Microsoft／Azure／.NET 用 microsoft-learn。
+- 落檔文件（spec／plan／handoff／research／report／memory）長度對齊任務所需：覆蓋實質內容即止，不補填充章節、重複摘要或樣板段落；同一結論不在同一檔重述兩次。
 
 ## Thin workflow
 
@@ -30,7 +31,7 @@
 - 命中 [T0-8] 必須先出 plan 並取得明確核准；模糊且會改檔時依 [T0-5] 停下發問。
 - Auth／payment／migration／deployment／destructive change 必須含 rollback。
 - Fix 必須先有 failing regression test；無正確 seam 時明標例外與後續 architecture work。
-- Delegation 依 shared `dev-workflow` [INT-4]：無條件約束（可獨立平行、寫入 ownership 不重疊、main context 重驗）不因任何授權而放寬；滿足約束且併發 ≤2、單階段累計 ≤6 時自主判定並直接執行，不必先問；超出上界才回到明示授權。
+- Delegation：依 shared `dev-workflow` [INT-4] 由 AI 自主判定，無須另問。
 
 ### S4 VERIFY
 
