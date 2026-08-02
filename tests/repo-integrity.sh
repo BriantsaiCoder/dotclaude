@@ -174,10 +174,47 @@ else
   ok "CLAUDE.md legacy workflow refs = 0"
 fi
 
-if jq -e '.enabledPlugins["superpowers@superpowers-marketplace"] == false' settings.json >/dev/null; then
-  ok "Superpowers registration 在 candidate 明確 disabled"
+# superpowers 是刻意移除的（2026-08-02 確認）。原斷言要求 enabledPlugins 裡必須有一筆
+# 明確的 false，但停用項目被 prune 掉之後 key 就不存在了——那是「更徹底的移除」，不是
+# 退步，斷言卻報紅。真正要守的不變量是「沒有被重新啟用」：absent 與 false 都算數，只有
+# true 才是退步。marketplace 仍註冊在 extraKnownMarketplaces，所以這條不能直接刪掉。
+if jq -e '.enabledPlugins["superpowers@superpowers-marketplace"] != true' settings.json >/dev/null; then
+  ok "Superpowers 未啟用（absent 或 false）"
 else
-  bad "Superpowers registration 尚未 disabled"
+  bad "Superpowers 已被重新啟用——應為 absent 或 false"
+fi
+
+if rg -q 'same-conversation.*`?/compact`?' templates/compact.md &&
+   ! rg -q '跨 session|cross-session|handoff' templates/compact.md; then
+  ok "compact template 只處理 same-conversation /compact"
+else
+  bad "compact template 與 cross-session handoff 語意重疊"
+fi
+if rg -q 'Same-conversation.*compact.*templates/compact\.md' CLAUDE.md &&
+   rg -q 'Cross-session handoff.*`?/handoff`?' CLAUDE.md; then
+  ok "CLAUDE.md 分流 /compact 與 /handoff"
+else
+  bad "CLAUDE.md 未分流 /compact 與 /handoff"
+fi
+# delegation 政策在 0ccbf98 改寫為「指向 shared [INT-4]，上界內自主判定」。原斷言比對的
+# 是改寫前的「未由授權即不使用 subagent」，政策換掉後這條就永遠紅——斷言比它要守的東西
+# 活得久，是這類文字比對測試的固定失效模式。
+#
+# 改為守新政策裡「被靜默拿掉也不會有人發現」的四個不變量：授權來源、無條件約束不因授權
+# 放寬、兩個並行上界。少任一個，delegation 的實際行為就變了。
+#
+# 上界只比對子句不比對數字（'併發 ≤' 而非 '併發 ≤2'）：本檔的收錄判準是「會靜默失效的
+# 才擋」。整個子句被拿掉是靜默的，把 ≤2 調成 ≤3 是擁有者的明示決定——寫死數字只會在
+# 每次調參時製造假警報，換不到額外的鑑別力。
+if rg -q 'Delegation 依 shared .*\[INT-4\]' CLAUDE.md &&
+   rg -q '不因任何授權而放寬' CLAUDE.md &&
+   rg -q '併發 ≤' CLAUDE.md &&
+   rg -q '單階段累計 ≤' CLAUDE.md &&
+   rg -q 'main context 重驗' CLAUDE.md &&
+   rg -q 'code-review.*shared.*\[INT-4\]' CLAUDE.md; then
+  ok "Claude delegation 授權與 shared INT-4 一致"
+else
+  bad "Claude delegation 與 shared INT-4 不一致——需含：依 shared [INT-4]、不因任何授權而放寬、併發上界、單階段累計上界、main context 重驗、code-review fan-out 依 shared [INT-4]"
 fi
 
 # CONVENTIONS 規則 11 的 host 一側。必須用 find 不得用 ls + glob：後者在 zsh 下任一

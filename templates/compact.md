@@ -1,6 +1,6 @@
 # Compact Template
 
-context 接近上限要 /compact 前、或跨 session handoff 時用此格式總結：
+same-conversation context 接近上限、準備 `/compact` 前用此格式總結：
 
 ```
 ---

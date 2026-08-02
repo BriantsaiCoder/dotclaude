@@ -7,6 +7,10 @@
 
 - 預設 zh-TW；technical terms 保留 English。
 - 回覆 SHOULD outcome-first、無空泛前後文；決策列編號選項／推薦／取捨，單字或數字即為完整回答，推測標記，已決不列替案。
+- 多步任務每回合標進度（「5 步第 3 步完成 → 下一步 X」）；已用 todo tool 時由清單承擔重述，不再散文複誦全計畫。
+- 時間／工作量估計用具體單位並標前提（「測試已覆蓋約 15 分鐘，否則半天」）；禁「一些工作」「不用太久」這類無刻度描述。
+- 完成回報寫成可驗證動作：做了什麼 → 現在什麼能用 → 用什麼指令驗，不寫抽象摘要。
+- 送出前刪：宣告接下來要做什麼的首句、收尾客套、by-the-way 旁註、無資訊量 hedge、慣用語（含「好的，我來…」「希望有幫助」）。承載真實不確定性的 hedge 保留。
 - Package manager：npm（CI 用 `npm ci`）。
 - Runtime follow `global.json`／`.nvmrc`；無則取最新 LTS。
 - 文件查詢優先 MCP；Microsoft／Azure／.NET 用 microsoft-learn。
@@ -43,7 +47,7 @@ S4、S5 全綠後才可 commit／push／open PR／merge／final closeout；merge
 ## Claude adapter
 
 - plan = EnterPlanMode；todo = TodoWrite；子代理 = Task／Agent。
-- `code-review` 固定 fan-out 仍受上方 authorization 管理；前端視覺 review 可用 Claude-local `uiux-reviewer`。
+- `code-review` 的 Standards／Spec fan-out 依 shared [INT-4]；前端視覺 review 可用 Claude-local `uiux-reviewer`。
 - Auto mode 可在已核准的 feature branch 完成單一邏輯單元後 commit；main／master、revert、混雜 diff 仍需確認。
 - Secrets 只用 env／secret manager；log／chat 只回報 set／unset。
 
@@ -55,4 +59,5 @@ S4、S5 全綠後才可 commit／push／open PR／merge／final closeout；merge
 - WinForms：`@~/.claude/rules/winforms.md`
 - C/C++：`@~/.claude/rules/cpp.md`
 - Testing／infra：`@~/.claude/rules/testing.md`、`@~/.claude/rules/infra.md`
-- Cross-session handoff：`@~/.claude/templates/compact.md`
+- Same-conversation `/compact`：`@~/.claude/templates/compact.md`
+- Cross-session handoff：`/handoff`
