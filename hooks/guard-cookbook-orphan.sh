@@ -12,9 +12,43 @@ set -euo pipefail
 
 input="$(cat)"
 
-file_path="$(printf '%s' "$input" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('file_path',''))" \
-  2>/dev/null || true)"
+# 解析器健康度：要判的不只是「python3 在不在」，還有「它真的讀得懂這份 payload 嗎」。
+# 兩種失效都讓 file_path 變成空字串，而空字串在下面直接 exit 0——於是整支守衛對缺
+# python3 的環境、以及對格式異常的 payload，都靜默失效。
+#
+# 那是 fail-open：守衛存在的理由是擋 cookbook 孤兒檔，卻在讀不懂輸入時選擇放行。
+# 同型缺陷 2026-08-02 在 ~/.agents 的 protect-files.sh 找到並修掉（agents-config
+# PR #37），修法一致——gate 在「解析是否成功」而非「解析器是否存在」。原寫法的
+# `|| true` 正是把前者的失敗吞掉的那一段。
+parse_ok=1
+file_path=""
+if ! command -v python3 >/dev/null 2>&1; then
+  parse_ok=0
+else
+  file_path="$(printf '%s' "$input" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('file_path',''))" \
+    2>/dev/null)" || parse_ok=0
+fi
+
+if [ "$parse_ok" -eq 0 ]; then
+  # 沒有 stdin 代表這不是 hook 呼叫，擋它才是誤擋。
+  [ -z "$input" ] && exit 0
+
+  # 也不能一律拒絕——這支守衛只管一個目錄慣例，卻會在缺 python3 的環境下讓使用者
+  # 任何專案的任何檔案都寫不了。折衷同 guard-git-push.sh:59-67：只對「原始 payload
+  # 本身就提到 docs/cookbook」的請求保守拒絕，其餘放行。
+  # 代價是 payload 壞到連這個字串都不剩時會漏放，但那類請求本來就不在守備範圍。
+  case "$input" in
+    *docs/cookbook*) ;;
+    *) exit 0 ;;
+  esac
+
+  cat >&2 <<'EOF'
+[cookbook 守衛] 無法解析 hook payload，無從判斷目標是否在 docs/cookbook/ 下，保守拒絕。
+兩種可能：python3 不可用（確認已安裝且在 PATH 中），或 payload 不是合法 JSON（確認 host 傳入的 stdin 格式）。
+EOF
+  exit 2
+fi
 
 [ -z "$file_path" ] && exit 0
 
