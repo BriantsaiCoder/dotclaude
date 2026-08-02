@@ -44,7 +44,7 @@ staged=$(git diff --cached --name-only --diff-filter=ACMR)
 while IFS= read -r f; do
   for p in "${BLOCKED_PATTERNS[@]}"; do
     if [[ "$f" =~ $p ]]; then
-      fail "黑名單檔案: $f （match: $p）"
+      fail "黑名單檔案: ${f}（match: ${p}）"
       errors=$((errors + 1))
       break
     fi

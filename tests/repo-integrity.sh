@@ -2,14 +2,16 @@
 #
 # repo-integrity.sh — ~/.claude 的機械守衛（P3-8）
 #
-# 為什麼是這五項：每一項都對應一種「壞掉但不會有錯誤訊息」的失效模式。
-# 會噴錯的東西不需要 CI 擋，會靜默失效的才需要。
+# 為什麼是這七項：每一項都對應一種「壞掉但不會有錯誤訊息」的失效模式。
+# 會噴錯的東西不需要 CI 擋，會靜默失效的才需要。編號與內文 section 一一對應。
 #
 #   1. JSON 解析     settings.json 壞掉時整份被靜默忽略，不是報錯
 #   2. skill symlink 斷鏈或指錯位置會讓共用 skill 靜默換掉或消失
 #   3. agent 定義    frontmatter 有 name 但缺 description 的檔案永遠不會載入
 #   4. shellcheck    hook 是 PreToolUse 攔截器，語法錯等於防線失效
 #   5. ownership     非 skill config 不可重新連回 ~/.agents control plane
+#   6. thin kernel   CLAUDE.md 的 budget／route／授權政策漂移不會有人察覺
+#   7. hook 行為     阻擋型 hook 讀不懂 payload 時放行，是無聲失去防線
 #
 # 用法: bash tests/repo-integrity.sh
 # 從 repo 根目錄跑；CI 與本機皆可。
@@ -234,5 +236,69 @@ if grep -q 'bash "\$HOME/\.agents/bin/hook-parity-check"' hooks/drift-check.sh 2
     bad "parity checker 呼叫缺 [ -x ] 守護——helper 缺檔時 SessionStart 會噴錯"
 fi
 
+# ── 7. 阻擋型 hook fail-closed ─────────────────────────────────
+#
+#
+# 這是行為檢查不是語法檢查：guard-cookbook-orphan.sh 的語法一直是對的，但解析器缺席
+# 或 payload 非法時 file_path 變空字串，而空字串直接 exit 0——守衛對整個缺 python3
+# 的環境靜默失效。2026-08-02 稽核實測 rc=0（放行）；同型缺陷同日在 ~/.agents 的
+# protect-files.sh 也找到（agents-config PR #37）。
+#
+# 符合本檔的收錄判準：會噴錯的東西不需要 CI 擋，這種靜默失效才需要。
+cookbook_guard=hooks/guard-cookbook-orphan.sh
+if [ ! -f "$cookbook_guard" ]; then
+  ok "cookbook 守衛不存在，略過 fail-closed 檢查"
+else
+  # 印 "rc:reason" 或 "rc:silent"。只斷言 exit code 不夠：把守衛的 `cat >&2` 換成
+  # `: <<EOF`（拒絕但不說原因）時三條斷言仍會全綠，而使用者只會看到 Claude 無聲拒工。
+  # 拒絕必須附理由，這是斷言的一部分。
+  _cb_probe() {  # $1=PATH $2=payload
+    _cb_err=$(printf '%s' "$2" | env PATH="$1" HOME="$HOME" bash "$cookbook_guard" 2>&1 >/dev/null)
+    _cb_rc=$?
+    [ -n "$_cb_err" ] && printf '%s:reason\n' "$_cb_rc" || printf '%s:silent\n' "$_cb_rc"
+  }
+  # mktemp 失敗不能 exit——那會跳過下面的總結與「至少跑到了」自證，讓整份測試靜默短路。
+  _nopy=$(mktemp -d) || _nopy=""
+  _cb_dir=$(mktemp -d) || _cb_dir=""
+  if [ -z "$_nopy" ] || [ -z "$_cb_dir" ]; then
+    bad "cookbook 守衛：無法建立暫存目錄，fail-closed 檢查未執行"
+    [ -n "$_nopy" ] && rm -rf "$_nopy"
+    [ -n "$_cb_dir" ] && rm -rf "$_cb_dir"
+  else
+  for _t in bash cat basename mktemp env printf; do
+    _p=$(command -v "$_t" 2>/dev/null) && ln -sf "$_p" "$_nopy/$_t"
+  done
+  mkdir -p "$_cb_dir/docs/cookbook"
+  _cb_payload="$(printf '{"tool_input":{"file_path":"%s/docs/cookbook/n.md"}}' "$_cb_dir")"
+
+  _rc_nopy=$(_cb_probe "$_nopy" "$_cb_payload")
+  _rc_badjson=$(_cb_probe "$PATH" '{"tool_input":{"file_path":"docs/cookbook/n.md"')
+  # 守備範圍：解析失敗時只能擋提到 docs/cookbook 的請求。少了這條，把守衛寫成
+  # 「解析失敗一律 exit 2」也會讓上面兩條全綠，代價是缺 python3 的環境什麼都寫不了。
+  _rc_offscope=$(_cb_probe "$_nopy" '{"tool_input":{"file_path":"/tmp/x/README.txt"}}')
+  # positive control：正常路徑仍須能區分 block 與 allow，否則上面幾條不具鑑別力
+  _rc_block=$(_cb_probe "$PATH" "$_cb_payload")
+  printf '# MOC\n' > "$_cb_dir/docs/cookbook/MOC.md"
+  _rc_allow=$(_cb_probe "$PATH" "$_cb_payload")
+  rm -rf "$_nopy" "$_cb_dir"
+
+  [ "$_rc_nopy" = 2:reason ] &&
+    ok "cookbook 守衛：解析器缺席時 fail-closed 並附理由" ||
+    bad "cookbook 守衛：解析器缺席時未帶理由拒絕（${_rc_nopy}，應 2:reason）——守衛靜默失效"
+  [ "$_rc_badjson" = 2:reason ] &&
+    ok "cookbook 守衛：payload 非法時 fail-closed 並附理由" ||
+    bad "cookbook 守衛：payload 非法時未帶理由拒絕（${_rc_badjson}，應 2:reason）"
+  [ "$_rc_offscope" = 0:silent ] &&
+    ok "cookbook 守衛：解析失敗但與 cookbook 無關的檔案仍放行" ||
+    bad "cookbook 守衛：過度阻擋（${_rc_offscope}，應 0:silent）——缺 python3 時任何檔案都寫不了"
+  { [ "$_rc_block" = 2:reason ] && [ "$_rc_allow" = 0:silent ]; } &&
+    ok "cookbook 守衛：正常路徑仍能區分 block/allow" ||
+    bad "cookbook 守衛：正常路徑失準（無 MOC ${_rc_block} 應 2:reason、有 MOC ${_rc_allow} 應 0:silent）"
+  fi
+fi
+
 printf '\n%d PASS / %d FAIL\n' "$pass" "$fail"
+# 「至少跑到了」自證：所有檢查都提前 return 時上面會印 0 PASS / 0 FAIL 卻 exit 0，
+# 那是本測試自己的 fail-open（同 agents-config PR #32 的處置）。
+[ "$pass" -gt 0 ] || { printf 'FAIL  沒有任何檢查執行成功\n'; exit 1; }
 [ "$fail" -eq 0 ]
