@@ -2,7 +2,7 @@
 #
 # repo-integrity.sh — ~/.claude 的機械守衛（P3-8）
 #
-# 為什麼是這七項：每一項都對應一種「壞掉但不會有錯誤訊息」的失效模式。
+# 為什麼是這八項：每一項都對應一種「壞掉但不會有錯誤訊息」的失效模式。
 # 會噴錯的東西不需要 CI 擋，會靜默失效的才需要。編號與內文 section 一一對應。
 #
 #   1. JSON 解析     settings.json 壞掉時整份被靜默忽略，不是報錯
@@ -12,6 +12,7 @@
 #   5. ownership     非 skill config 不可重新連回 ~/.agents control plane
 #   6. thin kernel   CLAUDE.md 的 budget／route／授權政策漂移不會有人察覺
 #   7. hook 行為     阻擋型 hook 讀不懂 payload 時放行，是無聲失去防線
+#   8. 變數名邊界   `$var` 緊接全形字元被吃進變數名，shellcheck 各級別都不報
 #
 # 用法: bash tests/repo-integrity.sh
 # 從 repo 根目錄跑；CI 與本機皆可。
@@ -294,6 +295,65 @@ else
   { [ "$_rc_block" = 2:reason ] && [ "$_rc_allow" = 0:silent ]; } &&
     ok "cookbook 守衛：正常路徑仍能區分 block/allow" ||
     bad "cookbook 守衛：正常路徑失準（無 MOC ${_rc_block} 應 2:reason、有 MOC ${_rc_allow} 應 0:silent）"
+  fi
+fi
+
+# ── 8. shell 變數名後緊接非 ASCII ──────────────────────────────
+#
+# `$var` 後面直接接全形字元時，bash 把後續 byte 一起吃進變數名。本 repo 訊息幾乎全是
+# zh-TW，`$var` 後面直接接 `）` `。` `，` 是高頻寫法，而 shellcheck 各級別都不報。
+# （本註解刻意不寫出連在一起的字面形式——那會被下面的實掃抓到，而豁免註解等於挖洞。）
+#
+# 兩種失效方向，都不會有錯誤訊息指向真正的原因：
+#   有 set -u  → unbound variable 中止，後續檢查完全不執行（pre-commit-claude.sh:47
+#                在 cafd8ab 之前就是這樣：黑名單命中時整支 hook 死掉，同檔的明文
+#                secret 掃描從來沒跑過）
+#   無 set -u  → 變數展開成空字串，診斷訊息把值吞掉（watch-ci-after-push.sh 的
+#                訊息把 `$GATE` 緊接句號，實際印出「找不到可執行的 」，路徑不見）
+#
+# 兩種都只在失敗分支發作，正常路徑永遠測不到——所以必須是機械守護而非人工複查。
+# 2026-08-02 本 session 共踩 9 次。agents-config 的 tests/conformance.sh 有同型守護，
+# 那邊寫死掃描目錄因而漏過 skills/ 21 支；這裡改掃第 4 項已在用的檔案集（追蹤中的
+# 非 symlink .sh），新增檔案自動納入。
+VARNAME_PAT='\$[a-zA-Z_][a-zA-Z0-9_]*\P{ASCII}'
+if ! command -v rg >/dev/null 2>&1; then
+  bad "shell 變數名檢查需要 rg，但 rg 不可用（缺工具的失敗方向是假綠）"
+else
+  # canary：pattern 寫壞就永遠是綠的。與實掃共用同一個 VARNAME_PAT，改壞這裡先紅。
+  # fixture 放 mktemp 不放 repo 內，否則會被下面的實掃掃到；全形字元用 printf octal
+  # 組出來不寫字面，同理。
+  canary_dir="$(mktemp -d)" || canary_dir=""
+  if [ -z "$canary_dir" ]; then
+    bad "shell 變數名 pattern canary 無法建立 fixture"
+  else
+    fw="$(printf '\357\274\211')"
+    printf 'echo "x$v%sy"\n' "$fw" > "$canary_dir/bad.sh"
+    printf 'echo "x${v}%sy"\n' "$fw" > "$canary_dir/good.sh"
+    canary_bad="$(rg -cP "$VARNAME_PAT" "$canary_dir/bad.sh" 2>/dev/null || echo 0)"
+    canary_good="$(rg -cP "$VARNAME_PAT" "$canary_dir/good.sh" 2>/dev/null || echo 0)"
+    rm -rf "$canary_dir"
+    if [ "$canary_bad" = 1 ] && [ "$canary_good" = 0 ]; then
+      ok "shell 變數名 pattern canary"
+    else
+      bad "shell 變數名 pattern canary 失效（bad=${canary_bad} 應 1、good=${canary_good} 應 0）"
+    fi
+  fi
+
+  varname_hits=0; varname_files=0
+  while IFS= read -r f; do
+    [ -L "$f" ] && continue
+    varname_files=$((varname_files+1))
+    c="$(rg -cP "$VARNAME_PAT" "$f" 2>/dev/null || echo 0)"
+    if [ "$c" -gt 0 ]; then
+      varname_hits=$((varname_hits + c))
+      bad "shell 變數名後緊接非 ASCII: ${f}（${c} 處，須改 \${var}）"
+    fi
+  done < <(git ls-files '*.sh')
+  # 掃到 0 個檔案時上面的迴圈不會 bad，摘要卻會顯示通過——那是假綠
+  if [ "$varname_files" -eq 0 ]; then
+    bad "shell 變數名檢查沒有掃到任何檔案（git ls-files '*.sh' 為空）"
+  elif [ "$varname_hits" -eq 0 ]; then
+    ok "shell 變數名後未緊接非 ASCII: ${varname_files} 個 .sh 全數通過"
   fi
 fi
 

@@ -87,7 +87,7 @@ FALLBACK='[全域設定] 偵測到 git push / gh pr create，但自動 merge gat
 # 可覆寫是為了讓 --selftest 能在不碰真實 PR 的情況下驗 STATE→下一步的對應。那段 case 是本檔
 # 唯一有分支的邏輯，也是最容易寫錯又最不容易在真實 push 時被發現的部分。
 GATE="${PR_REVIEW_GATE:-$HOME/.agents/bin/pr-review-gate}"
-[ -x "$GATE" ] || emit "$FALLBACK 原因：找不到可執行的 $GATE。"
+[ -x "$GATE" ] || emit "$FALLBACK 原因：找不到可執行的 ${GATE}。"
 
 # `cd` 到指令實際作用的目錄；失敗就退回文字提醒而不是猜。
 [ -n "$hook_cwd" ] && [ -d "$hook_cwd" ] && cd "$hook_cwd" 2>/dev/null
@@ -116,7 +116,7 @@ case "$out" in
   *)                  next='未預期的 STATE，當作未知處理，不得據此 merge。' ;;
 esac
 
-emit "[全域設定] 已於 push 後自動執行 merge gate（~/.agents/bin/pr-review-gate $pr）：
+emit "[全域設定] 已於 push 後自動執行 merge gate（~/.agents/bin/pr-review-gate ${pr}）：
 
 $out
 
