@@ -319,7 +319,23 @@ VARNAME_PAT='\$[a-zA-Z_][a-zA-Z0-9_]*\P{ASCII}'
 if ! command -v rg >/dev/null 2>&1; then
   bad "shell 變數名檢查需要 rg，但 rg 不可用（缺工具的失敗方向是假綠）"
 else
-  # canary：pattern 寫壞就永遠是綠的。與實掃共用同一個 VARNAME_PAT，改壞這裡先紅。
+  # rg 的三種退出碼必須分開處理：0=有命中、1=無命中、≥2=真錯誤。實測 rc=2 涵蓋
+  # 「檔案不可讀」「路徑不存在」「PCRE pattern 失效」三種，而 `rg … || echo 0` 會把
+  # 它們全部算成「0 處命中」，與乾淨檔無法區分——一條專門防 fail-open 的守護自己
+  # fail-open。掃描失敗必須報紅，不得冒充通過。
+  _vn_scan() {  # $1=檔案 → 印 "hits:<n>" 或 "err:<rc>"
+    local _out _rc
+    _out="$(rg -cP "$VARNAME_PAT" "$1" 2>/dev/null)"; _rc=$?
+    case "$_rc" in
+      0) printf 'hits:%s\n' "$_out" ;;
+      1) printf 'hits:0\n' ;;
+      *) printf 'err:%s\n' "$_rc" ;;
+    esac
+  }
+
+  # canary：pattern 寫壞就永遠是綠的。與實掃共用同一個 VARNAME_PAT 與 _vn_scan，
+  # 改壞任一邊這裡先紅。三態都驗——正向抓得到、反向不誤報、掃描失敗會被辨識為錯誤
+  # （用不存在的路徑當錯誤 fixture，比 chmod 000 穩定且不受執行身分影響）。
   # fixture 放 mktemp 不放 repo 內，否則會被下面的實掃掃到；全形字元用 printf octal
   # 組出來不寫字面，同理。
   canary_dir="$(mktemp -d)" || canary_dir=""
@@ -329,30 +345,35 @@ else
     fw="$(printf '\357\274\211')"
     printf 'echo "x$v%sy"\n' "$fw" > "$canary_dir/bad.sh"
     printf 'echo "x${v}%sy"\n' "$fw" > "$canary_dir/good.sh"
-    canary_bad="$(rg -cP "$VARNAME_PAT" "$canary_dir/bad.sh" 2>/dev/null || echo 0)"
-    canary_good="$(rg -cP "$VARNAME_PAT" "$canary_dir/good.sh" 2>/dev/null || echo 0)"
+    canary_bad="$(_vn_scan "$canary_dir/bad.sh")"
+    canary_good="$(_vn_scan "$canary_dir/good.sh")"
+    canary_err="$(_vn_scan "$canary_dir/nosuch.sh")"
     rm -rf "$canary_dir"
-    if [ "$canary_bad" = 1 ] && [ "$canary_good" = 0 ]; then
-      ok "shell 變數名 pattern canary"
+    if [ "$canary_bad" = hits:1 ] && [ "$canary_good" = hits:0 ] &&
+       [ "${canary_err%%:*}" = err ]; then
+      ok "shell 變數名 pattern canary（正向／反向／掃描錯誤三態）"
     else
-      bad "shell 變數名 pattern canary 失效（bad=${canary_bad} 應 1、good=${canary_good} 應 0）"
+      bad "shell 變數名 pattern canary 失效（bad=${canary_bad} 應 hits:1、good=${canary_good} 應 hits:0、err=${canary_err} 應 err:*）"
     fi
   fi
 
-  varname_hits=0; varname_files=0
+  varname_hits=0; varname_files=0; varname_err=0
   while IFS= read -r f; do
     [ -L "$f" ] && continue
     varname_files=$((varname_files+1))
-    c="$(rg -cP "$VARNAME_PAT" "$f" 2>/dev/null || echo 0)"
-    if [ "$c" -gt 0 ]; then
-      varname_hits=$((varname_hits + c))
-      bad "shell 變數名後緊接非 ASCII: ${f}（${c} 處，須改 \${var}）"
-    fi
+    r="$(_vn_scan "$f")"
+    case "$r" in
+      hits:0) ;;
+      hits:*) varname_hits=$((varname_hits + ${r#hits:}))
+              bad "shell 變數名後緊接非 ASCII: ${f}（${r#hits:} 處，須改 \${var}）" ;;
+      *)      varname_err=$((varname_err+1))
+              bad "shell 變數名檢查無法掃描 ${f}（rg ${r}）——不當作通過" ;;
+    esac
   done < <(git ls-files '*.sh')
   # 掃到 0 個檔案時上面的迴圈不會 bad，摘要卻會顯示通過——那是假綠
   if [ "$varname_files" -eq 0 ]; then
     bad "shell 變數名檢查沒有掃到任何檔案（git ls-files '*.sh' 為空）"
-  elif [ "$varname_hits" -eq 0 ]; then
+  elif [ "$varname_hits" -eq 0 ] && [ "$varname_err" -eq 0 ]; then
     ok "shell 變數名後未緊接非 ASCII: ${varname_files} 個 .sh 全數通過"
   fi
 fi
