@@ -124,8 +124,8 @@ fi
 for f in $S53_AGENTS; do
   if [ ! -f "$f" ]; then
     bad "[S5-3] 分類指向不存在的 agent: $f"
-  elif grep -Fq '手刻標準庫或平台已提供的功能' "$f" &&
-    grep -Fq '為平台／既有模組已有的能力新增依賴' "$f"; then
+  elif grep -Fq '手刻標準庫或平台已提供的功能 → 指名該 API 取代。' "$f" &&
+    grep -Fq '為平台／既有模組已有的能力新增依賴 → 依選型階梯（原生 > 標準庫 > 既有模組 > 第三方 > 手寫）回退。' "$f"; then
     ok "code review agent 含 [S5-3] baseline 兩條全文: $f"
   else
     bad "code review agent 缺 [S5-3] over-engineering baseline 兩條全文: $f"
