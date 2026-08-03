@@ -92,6 +92,46 @@ while IFS= read -r f; do
   esac
 done < <(git ls-files 'agents/*.md')
 
+# [S5-3]（~/.agents/skills/dev-workflow/SKILL.md）要求 house over-engineering baseline 兩條
+# 逐字進「每一個」reviewer prompt，含 host-local review agent。2026-08-03 之前零測試守它，
+# 同日 reviewer-template.md 被編輯注入 [S5-4] 時這兩條仍被漏掉——單純是注意力都在 S5-4，
+# 沒有機械守衛擋。規則沒有守衛就會在下一次編輯再漏一次。
+#
+# closed-world set 而非 pattern 過濾：檔名 glob 兩頭都會出錯——`*code*` 會把 `Decoder.md`
+# 這種偶然含 "code" 的檔掃進來（吵，但 fail-closed），更糟的是 `security-reviewer.md`、
+# `csharp-reviewer.md` 這類真 code reviewer 完全掃不到（靜默 fail-open，正是本條要修的
+# 失效型態換位置重現）。frontmatter 的 name／description 更糟：description 是 trigger
+# routing 面，會為了 invocation accuracy 被調整，把 correctness gate 綁上去等於改一次
+# description 就靜默換掉守備範圍。改為列舉必須帶規則的檔案集，發現集不符即 FAIL——新增
+# 或改名 review agent 時測試會強迫你回來更新這份清單。
+#
+# uiux-reviewer 刻意不在集合內：它審渲染後的頁面（視覺層級、可讀性、操作直覺），「手刻
+# 標準庫」與「多餘依賴」是 code 層判斷，超出其職權。註記：[S5-3] 條文寫「不論 reviewer
+# 型別…皆適用」，本排除是測試側的收窄，尚未反映進條文本身——待 kernel 側裁決。
+#
+# 比對兩條的「全文」而非只比英文 label：[S5-3] 驗證條款寫的是「含該兩條全文」，只放
+# `Reinvented Stdlib` 六個字的 stub 會過。與 ~/.agents/tests/mattpocock-workflow.sh 的
+# 同名斷言強度對齊。
+S53_AGENTS='agents/code-reviewer.md agents/DotNet-Code-Reviewer.md'
+S53_EXEMPT='agents/uiux-reviewer.md'
+actual_agents="$(git ls-files 'agents/*.md' | LC_ALL=C sort | tr '\n' ' ')"
+expected_agents="$(printf '%s %s' "$S53_AGENTS" "$S53_EXEMPT" | tr ' ' '\n' | grep -v '^$' | LC_ALL=C sort | tr '\n' ' ')"
+if [ "$actual_agents" = "$expected_agents" ]; then
+  ok "agents/ 清單與 [S5-3] 分類一致"
+else
+  bad "agents/ 清單已變動，[S5-3] 分類需更新：實際=[$actual_agents] 已分類=[$expected_agents]"
+fi
+for f in $S53_AGENTS; do
+  if [ ! -f "$f" ]; then
+    bad "[S5-3] 分類指向不存在的 agent: $f"
+  elif grep -Fq '手刻標準庫或平台已提供的功能' "$f" &&
+    grep -Fq '為平台／既有模組已有的能力新增依賴' "$f"; then
+    ok "code review agent 含 [S5-3] baseline 兩條全文: $f"
+  else
+    bad "code review agent 缺 [S5-3] over-engineering baseline 兩條全文: $f"
+  fi
+done
+
 # ── 4. shellcheck ─────────────────────────────────────────────
 # 只檢查本 repo 自己的實體 .sh；symlink 進來的由 ~/.agents 的 CI 負責。
 if command -v shellcheck >/dev/null 2>&1; then
@@ -354,9 +394,12 @@ else
   # 「檔案不可讀」「路徑不存在」「PCRE pattern 失效」三種，而 `rg … || echo 0` 會把
   # 它們全部算成「0 處命中」，與乾淨檔無法區分——一條專門防 fail-open 的守護自己
   # fail-open。掃描失敗必須報紅，不得冒充通過。
-  _vn_scan() {  # $1=檔案 → 印 "hits:<n>" 或 "err:<rc>"
+  # `--count-matches` 而非 `-c`：後者數的是「命中的行數」，但下面的訊息以「N 處」
+  # 回報 occurrence，同一行有兩個 `$var` 時會低估（Copilot 於 PR #4 指出）。改用
+  # --count-matches 後數字語意與訊息一致。不影響 pass/fail——判準是「有無命中」。
+  _vn_scan() {  # $1=檔案 → 印 "hits:<n>" 或 "err:<rc>"，n 為 occurrence 數
     local _out _rc
-    _out="$(rg -cP "$VARNAME_PAT" "$1" 2>/dev/null)"; _rc=$?
+    _out="$(rg --count-matches -P "$VARNAME_PAT" "$1" 2>/dev/null)"; _rc=$?
     case "$_rc" in
       0) printf 'hits:%s\n' "$_out" ;;
       1) printf 'hits:0\n' ;;
