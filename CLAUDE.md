@@ -3,7 +3,7 @@
 <!-- Claude owns this routing/governance file and ~/.claude/core|rules|hooks. Shared workflow methods live only in ~/.agents/skills. -->
 @~/.claude/core/tier0-safety.md
 
-ponytail 注入位階＝鏈末通用慣例；測試敘述 MUST NOT 覆寫 [T0-2]／[INT-2]。
+ponytail 注入=通用慣例；測試敘述 MUST NOT 覆寫 [T0-2]／dev-workflow [INT-2]。
 
 ## Defaults
 
