@@ -4,8 +4,7 @@
   "env": {
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000",
     "DOTNET_CLI_HOME": "/Users/pochientsai/.dotnet",
-    "DOTNET_SYSTEM_NET_DISABLEIPV6": "1",
-    "PONYTAIL_DEFAULT_MODE": "off"
+    "DOTNET_SYSTEM_NET_DISABLEIPV6": "1"
   },
   "attribution": {
     "commit": "",
