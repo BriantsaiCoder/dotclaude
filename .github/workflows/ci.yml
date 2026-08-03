@@ -12,18 +12,20 @@ jobs:
   integrity:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ~/.agents 不存在於本 repo 的 CI 環境，所以 94 個 symlink 全是斷鏈。
       # 這是預期的：repo-integrity.sh 只驗 symlink 的「形狀」不驗目標存在，
       # 因為形狀錯（絕對路徑、指到別的 kind、改名沒重連）才是會靜默換掉
       # skill 內容的那一種失效。目標存在性由本機 `agents-sync --doctor` 負責。
-      # ripgrep 不可省：repo-integrity.sh 有 12 處 `rg` 斷言，缺它時不會報錯而是
+      # ripgrep 不可省：repo-integrity.sh 大量以 `rg` 斷言，缺它時不會報錯而是
       # 依斷言極性一半 FAIL、一半假 PASS——2026-08-01 run 30671830610 實證。
+      # 這裡不寫死處數：註解一旦複述腳本內容就會漂移（原本寫 12，實際已是 21）。
       - name: 安裝 shellcheck 與 ripgrep
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck ripgrep
 
-      - name: repo 完整性（JSON / symlink 形狀 / agent 定義 / routing stamp / shellcheck）
+      # step 名稱不複述檢查項目，同上理由——檢查了什麼由腳本自己的輸出負責。
+      - name: repo 完整性
         run: bash tests/repo-integrity.sh
 
       # 這個 hook 是 [T0-3] force-push 防線的完整實作。2026-07-29 三家 config
