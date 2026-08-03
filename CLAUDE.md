@@ -25,7 +25,7 @@ ponytail 注入=通用慣例；測試敘述 MUST NOT 覆寫 [T0-2]／dev-workflo
 ### Authorization
 
 - Delegation：依 shared `dev-workflow` [INT-4] 由 AI 自主判定，無須另問。
-- Delegation 收斂（不覆寫 [INT-4] 的數量自主）：幾個 tool call 可完成的工作不派 subagent；單一小任務不拆多個 subagent；S5 以外不另派 subagent 做 verification（S5 的獨立視角依 [S5-3] 保留）；已委派就不重做、不重推導其回報結論。
+- Delegation 收斂（不覆寫 [INT-4] 的數量自主）：幾個 tool call 可完成的工作不派 subagent；單一小任務不拆多個 subagent；S5 以外不另派 subagent 做 verification（S5 的獨立視角依 [S5-3] 保留）；已委派就不重跑其探索過程、不重推導其推理鏈，但其宣稱的結果仍依 [INT-4] 由 main context 以證據核對。
 
 ### S4 VERIFY
 
