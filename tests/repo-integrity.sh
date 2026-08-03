@@ -180,9 +180,25 @@ else
   bad "Claude core import 尚未 thin"
 fi
 
-for marker in dev-workflow S4 S5 S6 grilling domain-modeling implement tdd diagnosing-bugs code-review codebase-design; do
+# 結構性 marker 留在 CLAUDE.md：它們是 host adapter 自己的骨架，不是 shared method。
+for marker in dev-workflow S4 S5 S6 code-review; do
   rg -q "$marker" CLAUDE.md || bad "CLAUDE.md thin route 缺失: $marker"
 done
+
+# routing 明細的正本在 shared kernel 的 S0 ROUTE 表；CLAUDE.md 只留指標（見上方 thin 要求）。
+# 在這裡查 CLAUDE.md 會反過來強制它複述 kernel，與 thin 要求互相矛盾。
+# CI 沒有 ~/.agents，kernel 缺席時改驗指標仍在——指標斷掉才是會靜默失效的那一種。
+kernel="$HOME/.agents/skills/dev-workflow/SKILL.md"
+if [ -r "$kernel" ]; then
+  for marker in grilling domain-modeling implement tdd diagnosing-bugs codebase-design; do
+    rg -q "$marker" "$kernel" || bad "dev-workflow kernel routing 缺失: $marker"
+  done
+  ok "dev-workflow kernel 持有 routing 明細"
+elif rg -q 'skills/dev-workflow/SKILL\.md' CLAUDE.md; then
+  ok "kernel 不在此環境；CLAUDE.md 仍持有 dev-workflow 指標"
+else
+  bad "kernel 不在此環境且 CLAUDE.md 缺 dev-workflow 指標（routing 完全斷鏈）"
+fi
 
 if rg -q 'superpowers:|mp-(diagnose|grill-with-docs|improve-codebase-architecture|tdd)' CLAUDE.md; then
   bad "CLAUDE.md 仍引用 legacy workflow"

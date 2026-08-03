@@ -20,12 +20,6 @@
 
 任何開發任務先讀 `~/.agents/skills/dev-workflow/SKILL.md`；host-local prose 不複製 method。
 
-- 需求／domain：`grilling` + `domain-modeling`。
-- Spec／tickets／長期決策：`to-spec`、`to-tickets`、`wayfinder`。
-- Implementation／TDD：`implement` + `tdd`；先建 isolated worktree，禁止 current/main commit。
-- Diagnosis／review／architecture：`diagnosing-bugs`、`code-review`、`codebase-design`。
-- 陌生 repo／小需求：`acquire-codebase-knowledge`、`sdd`。
-
 ### Authorization
 
 - 命中 [T0-8] 必須先出 plan 並取得明確核准；模糊且會改檔時依 [T0-5] 停下發問。
@@ -36,10 +30,6 @@
 ### S4 VERIFY
 
 Build／test／lint 與 task-specific probes 全跑；中高風險附 before／after evidence。無 evidence 不得宣稱完成。
-
-### S5 REVIEW
-
-用 `code-review` 分開跑 Standards／Spec；各軸標 PASS／FAIL／SKIPPED／UNAVAILABLE，actionable findings 歸零才可前進。
 
 ### S6 CLOSEOUT
 
