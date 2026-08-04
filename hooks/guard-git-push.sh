@@ -68,7 +68,7 @@ SCAN_INPUT=${SCAN_INPUT//\)/}
 # 的請求保守拒絕，其餘放行；使用者會看到明確理由而非靜默失去防線。
 if [ -z "$JQ" ] || ! CMD=$(printf '%s' "$INPUT" | "$JQ" -r '.tool_input.command // empty' 2>/dev/null); then
   case "$SCAN_INPUT" in
-    *git*push*) deny "[T0-3] jq 不可用或 payload 解析失敗，無法判定 push 目標，保守拒絕。請確認 jq 已安裝且在 PATH 中。" ;;
+    *[Gg][Ii][Tt]*push*) deny "[T0-3] jq 不可用或 payload 解析失敗，無法判定 push 目標，保守拒絕。請確認 jq 已安裝且在 PATH 中。" ;;
   esac
   exit 0
 fi
@@ -77,12 +77,12 @@ fi
 SCAN_CMD=${CMD//$'\\\n'/}
 SCAN_CMD=${SCAN_CMD//\"/}
 SCAN_CMD=${SCAN_CMD//\'/}
-SCAN_CMD=${SCAN_CMD//\\/}
 SCAN_CMD=${SCAN_CMD//\$/}
 SCAN_CMD=${SCAN_CMD//\(/}
 SCAN_CMD=${SCAN_CMD//\)/}
 SCAN_CMD=${SCAN_CMD//[\{\},]/ }
-case "$SCAN_CMD" in *git*push*) ;; *) exit 0 ;; esac
+SCAN_WIN=${SCAN_CMD//\\/\/}
+SCAN_CMD=${SCAN_CMD//\\/}
 check_target() {
   case "$1" in
     :|*\**) deny "[T0-3] --force-with-lease 搭配 matching／wildcard refspec 無法排除保護分支，已保守拒絕。" ;;
@@ -99,17 +99,20 @@ check_target() {
 }
 
 check_seg() {
-  local seg="$1" t
+  local seg="$1" win_seg="$2" t win_t
   local IFS=$' \t\n'
-  local -a toks=() args=()
+  local -a toks=() win_toks=() args=()
   read -r -a toks <<< "$seg"
+  read -r -a win_toks <<< "$win_seg"
   local i seen_git=0 seen_push=0 has_force=0 has_lease=0 lease_exact=0 other_option=0
   for ((i = 0; i < ${#toks[@]}; i++)); do
     t=${toks[i]}
+    win_t=${win_toks[i]:-}
     if (( ! seen_push )); then
       # 只認裸 token `git` 會被完整路徑繞過（/usr/bin/git push --force …）。
-      # SCAN_CMD 已先移除引號與跳脫；這裡只比對 git 可執行檔的常見 token。
-      case "$t" in git|*/git|git.exe|*/git.exe) seen_git=1 ;; esac
+      # Scan variants 已移除引號，並分別處理 shell escape 與 Windows path separator。
+      case "$t" in [Gg][Ii][Tt]|*/[Gg][Ii][Tt]|[Gg][Ii][Tt].[Ee][Xx][Ee]|*/[Gg][Ii][Tt].[Ee][Xx][Ee]) seen_git=1 ;; esac
+      case "$win_t" in [Gg][Ii][Tt]|*/[Gg][Ii][Tt]|[Gg][Ii][Tt].[Ee][Xx][Ee]|*/[Gg][Ii][Tt].[Ee][Xx][Ee]) seen_git=1 ;; esac
       [[ $seen_git -eq 1 && "$t" == push ]] && seen_push=1
       continue
     fi
@@ -134,8 +137,17 @@ check_seg() {
   return 0
 }
 
-# 複合命令切段（; | & 皆為段界），只檢查含 git push 的段
-while IFS= read -r seg; do
-  case "$seg" in *git*push*) check_seg "$seg" ;; esac
-done < <(printf '%s\n' "$SCAN_CMD" | tr ';|&' '\n')
+# 複合命令切段（; | & 與 newline 皆為段界），再逐 token 合併兩種 scan 視圖。
+SEP=$'\034'
+CMD_SEGMENTS=${SCAN_CMD//[\;\|\&]/$SEP}
+CMD_SEGMENTS=${CMD_SEGMENTS//$'\n'/$SEP}
+WIN_SEGMENTS=${SCAN_WIN//[\;\|\&]/$SEP}
+WIN_SEGMENTS=${WIN_SEGMENTS//$'\n'/$SEP}
+cmd_segments=()
+win_segments=()
+IFS="$SEP" read -r -a cmd_segments <<< "$CMD_SEGMENTS"
+IFS="$SEP" read -r -a win_segments <<< "$WIN_SEGMENTS"
+for ((seg_i = 0; seg_i < ${#cmd_segments[@]}; seg_i++)); do
+  check_seg "${cmd_segments[seg_i]}" "${win_segments[seg_i]:-}"
+done
 exit 0
