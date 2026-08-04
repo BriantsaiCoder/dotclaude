@@ -36,14 +36,14 @@ jobs:
       # 這裡只確認防線沒有退化成空殼或壞語法。
       # 錨點選判定變數而非註解標記：只驗 '[T0-3]' 的話，一個
       # `# [T0-3]` + `exit 0` 的空殼也會 PASS——探針就偵測不到它自稱偵測的退化。
-      # has_force / broad_refset 是實際判定 force 變體與 --all/--mirror 的變數，
+      # has_force / other_option 是實際判定 force 變體與非 canonical lease option 的變數，
       # main|master 是保護分支判定；三者任一消失都代表防線真的被換掉了。
       - name: guard-git-push 防線未退化
         run: |
           set -euo pipefail
           f=hooks/guard-git-push.sh
           test -f "$f" || { echo "缺少 $f"; exit 1; }
-          for anchor in '\[T0-3\]' 'has_force' 'broad_refset' 'main|master'; do
+          for anchor in '\[T0-3\]' 'has_force' 'other_option' 'main|master'; do
             grep -q "$anchor" "$f" \
               || { echo "$f 缺少判定錨點 $anchor——防線可能已被空殼取代"; exit 1; }
           done
