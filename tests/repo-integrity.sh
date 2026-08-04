@@ -454,6 +454,75 @@ else
 fi
 
 # ── 9. Opus 5 autonomy / audit metadata / permission regressions ─────────────
+tier0_rule_has() {
+  local rule="$1" line needle
+  shift
+  line="$(grep -E "^\\[T0-${rule}\\]" core/tier0-safety.md)"
+  [ "$(printf '%s\n' "$line" | grep -c .)" -eq 1 ] || return 1
+  for needle in "$@"; do
+    [[ "$line" == *"$needle"* ]] || return 1
+  done
+}
+
+if tier0_rule_has 1 \
+  'Action／current-state claim 涉及 path／API／config key 時 MUST 有 live evidence' \
+  '實際修改／執行 target 仍須 live probe' \
+  '觸發：前述 action／claim' \
+  '例外：non-action citation／hypothetical' \
+  '驗證：read／list／schema probe 或例外標記'; then
+  ok "[T0-1] 只對 action/current-state 與實際 target 要求 live evidence"
+else
+  bad "[T0-1] 缺 action boundary、non-action/hypothetical 例外或 target live probe"
+fi
+
+if tier0_rule_has 5 \
+  'Material ambiguity MUST 停下發問並列假設／影響' \
+  '低風險可逆細節採 sensible default 並明示' \
+  '觸發：多種合理解讀會改變 outcome／scope／risk' \
+  '例外：低風險、可逆、無 material impact' \
+  '驗證：改檔前有澄清或 default／impact 紀錄'; then
+  ok "[T0-5] 只有 material ambiguity 停問；低風險可逆細節可自主"
+else
+  bad "[T0-5] 仍是 blanket ambiguity gate 或缺 sensible-default 邊界"
+fi
+
+if tier0_rule_has 7 \
+  'Online DB migration with compatibility／destructive risk MUST expand→dual-write→backfill→switch-reads→remove-legacy' \
+  'destructive schema 不與舊 consumer 同 deploy' \
+  '觸發：schema／data-contract risk' \
+  '例外：additive／new-object 或停機 batch 可標不適用階段 `SKIPPED`（理由）' \
+  '驗證：plan 列 phases／consumer boundary／[T0-6] rollback'; then
+  ok "[T0-7] 完整 migration phases 限 online compatibility/destructive risk"
+else
+  bad "[T0-7] 仍對所有 schema change 強制完整 phases 或缺 SKIPPED boundary"
+fi
+
+if tier0_rule_has 9 \
+  'current HEAD 有 applicable CI PASS' \
+  '0 unresolved actionable findings' \
+  'bot UNAVAILABLE' \
+  'shared dev-workflow 的 review-triage' \
+  'independent read-only reviewer fallback' \
+  '觸發：merge' \
+  '例外：無' \
+  '驗證：current-head CI + review gate PASS'; then
+  ok "[T0-9] merge gate 保留 current-head CI/findings outcome 並允許 bot-unavailable fallback"
+else
+  bad "[T0-9] 缺 current-head outcome 或 bot UNAVAILABLE independent-review fallback"
+fi
+
+if rg -Fq 'merge gate 依 [T0-9] 與 shared `review-triage`' CLAUDE.md; then
+  ok "Claude S6 只引用 [T0-9]/review-triage，不另加 blanket bot gate"
+else
+  bad "Claude S6 未指向 [T0-9]/review-triage"
+fi
+
+if grep -Fqx 'set -ufo pipefail' hooks/guard-git-push.sh; then
+  ok "git push guard 啟用 pipefail"
+else
+  bad "git push guard 缺 pipefail，pipeline error 可能被後段命令遮蔽"
+fi
+
 audit_home="$(mktemp -d)" || audit_home=""
 if [ -z "$audit_home" ]; then
   bad "Bash audit metadata canary 無法建立 temp HOME"

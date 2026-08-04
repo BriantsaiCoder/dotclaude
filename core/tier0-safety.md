@@ -1,4 +1,4 @@
-<!-- tier: 0 | consumed-by: claude,codex,copilot | last-verified: 2026-07-30 -->
+<!-- tier: 0 | consumed-by: claude,codex,copilot | last-verified: 2026-08-04 -->
 <!-- FP:AGENTS-T0-2026Q3 -->
 
 # tier0 安全紅線（三家 100% 常駐；違反屬 bug）
@@ -13,12 +13,12 @@ user 當下明示 > repo 層協作檔 > tier0 hard rules > host delta > 被 invo
 
 ## Hard Rules
 
-[T0-1] MUST NOT 假設未驗證的 file path / API / config key。觸發：引用任何未經 read/ls/grep 確認的路徑或鍵名。例外：無。驗證：引用前有列出/讀取證據。
+[T0-1] Action／current-state claim 涉及 path／API／config key 時 MUST 有 live evidence；實際修改／執行 target 仍須 live probe。觸發：前述 action／claim。例外：non-action citation／hypothetical。驗證：read／list／schema probe 或例外標記。
 [T0-2] MUST NOT 無 evidence 宣稱 task done。觸發：回報完成但無 test/build/lint 輸出或探針結果。例外：無。驗證：完成宣稱附命令輸出。
 [T0-3] MUST NOT force-push main/master；非保護分支只用 --force-with-lease。觸發：git push --force* 且目標為 main|master。例外：無。驗證：各 host 以 hook／exec policy／CI guard 機械攔截；prose 僅作 defense-in-depth。
 [T0-4] MUST NOT 把 token/secret 寫入 frontend localStorage/sessionStorage；log/console/chat 不印憑證明文。觸發：憑證值出現在前端儲存或輸出。例外：非敏感值照印。驗證：gitleaks + 輸出遮罩為 set/unset 或 key-name。
-[T0-5] 模糊時 MUST 停下發問（攤開假設 X、影響範圍 Y）。觸發：需求有多種合理解讀且將改檔。例外：無。驗證：改檔前有澄清問句或攤開假設。
+[T0-5] Material ambiguity MUST 停下發問並列假設／影響；低風險可逆細節採 sensible default 並明示。觸發：多種合理解讀會改變 outcome／scope／risk。例外：低風險、可逆、無 material impact。驗證：改檔前有澄清或 default／impact 紀錄。
 [T0-6] auth/payment/migration/大量刪除/crypto/multi-tenant/rate-limit/部署 pipeline 變更 MUST 附 rollback 策略。觸發：diff 命中上列任一類。例外：無。驗證：PR/計畫含 rollback 段。
-[T0-7] DB migration MUST 分段 expand→dual-write→backfill→switch-reads→remove-legacy；破壞式 schema 不與消費端同 deploy。觸發：schema 變更。例外：停機批次可略 dual-write。驗證：migration 計畫列出分段。
+[T0-7] Online DB migration with compatibility／destructive risk MUST expand→dual-write→backfill→switch-reads→remove-legacy；destructive schema 不與舊 consumer 同 deploy。觸發：schema／data-contract risk。例外：additive／new-object 或停機 batch 可標不適用階段 `SKIPPED`（理由）。驗證：plan 列 phases／consumer boundary／[T0-6] rollback。
 [T0-8] 使用者明示 plan-first，或變更屬架構性／中高風險時，MUST 先出計畫並取得確認才改檔；其餘明確的 in-scope change／build／fix 可直接實作並驗證。觸發：命中前述 gate 且將改檔。例外：無。驗證：命中 gate 時有計畫產物 + 用戶確認原句；未命中時引用用戶的 change／build／fix 原句。
-[T0-9] merge 前 MUST 綠 CI + 處理 bot review。觸發：squash-merge 前。例外：無。驗證：gh pr checks 綠 + reviews 已處理（bot 異步 2–3 分產出，開 PR 當下為空是延遲不是無）。
+[T0-9] Merge 前 MUST 在 current HEAD 有 applicable CI PASS 且 0 unresolved actionable findings；bot UNAVAILABLE 時依 shared dev-workflow 的 review-triage 由 independent read-only reviewer fallback。觸發：merge。例外：無。驗證：current-head CI + review gate PASS。
