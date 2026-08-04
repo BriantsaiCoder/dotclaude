@@ -2,7 +2,7 @@
 #
 # repo-integrity.sh — ~/.claude 的機械守衛（P3-8）
 #
-# 為什麼是這八項：每一項都對應一種「壞掉但不會有錯誤訊息」的失效模式。
+# 為什麼是這九項：每一項都對應一種「壞掉但不會有錯誤訊息」的失效模式。
 # 會噴錯的東西不需要 CI 擋，會靜默失效的才需要。編號與內文 section 一一對應。
 #
 #   1. JSON 解析     settings.json 壞掉時整份被靜默忽略，不是報錯
@@ -13,6 +13,7 @@
 #   6. thin kernel   CLAUDE.md 的 budget／route／授權政策漂移不會有人察覺
 #   7. hook 行為     阻擋型 hook 讀不懂 payload 時放行，是無聲失去防線
 #   8. 變數名邊界   `$var` 緊接全形字元被吃進變數名，shellcheck 各級別都不報
+#   9. Opus 5 設定   autonomy／audit／permission／effort 漂移不會主動報錯
 #
 # 用法: bash tests/repo-integrity.sh
 # 從 repo 根目錄跑；CI 與本機皆可。
@@ -450,6 +451,168 @@ else
   elif [ "$varname_hits" -eq 0 ] && [ "$varname_err" -eq 0 ]; then
     ok "shell 變數名後未緊接非 ASCII: ${varname_files} 個 .sh 全數通過"
   fi
+fi
+
+# ── 9. Opus 5 autonomy / audit metadata / permission regressions ─────────────
+audit_home="$(mktemp -d)" || audit_home=""
+if [ -z "$audit_home" ]; then
+  bad "Bash audit metadata canary 無法建立 temp HOME"
+else
+  mkdir -p "$audit_home/.claude"
+  legacy_log="$audit_home/.claude/audit-bash.log"
+  printf 'legacy-command-log-must-remain-byte-identical\n' > "$legacy_log"
+  chmod 640 "$legacy_log"
+  legacy_hash_before="$(git hash-object --no-filters -- "$legacy_log")"
+  legacy_mode_before="$(stat -f%Lp "$legacy_log" 2>/dev/null || stat -c%a "$legacy_log" 2>/dev/null || true)"
+  sentinel='AUDIT_COMMAND_MUST_NOT_PERSIST_7f91'
+  payload="$(printf '{\"permission_mode\":\"auto\",\"cwd\":\"/tmp/audit-probe\",\"tool_input\":{\"command\":\"curl -H token:%s\"}}' "$sentinel")"
+  printf '%s' "$payload" | HOME="$audit_home" bash hooks/audit-bash.sh
+  audit_log="$audit_home/.claude/audit-bash-metadata.log"
+  audit_mode="$(stat -f%Lp "$audit_log" 2>/dev/null || stat -c%a "$audit_log" 2>/dev/null || true)"
+  if [ -f "$audit_log" ] && [ "$audit_mode" = 600 ] &&
+     jq -e 'keys == ["cwd","permission_mode","timestamp","tool"] and .tool == "Bash" and .permission_mode == "auto" and .cwd == "/tmp/audit-probe"' "$audit_log" >/dev/null 2>&1 &&
+     ! rg -q "$sentinel|tool_input|command" "$audit_log" &&
+     [ "$(git hash-object --no-filters -- "$legacy_log")" = "$legacy_hash_before" ] &&
+     [ "$(stat -f%Lp "$legacy_log" 2>/dev/null || stat -c%a "$legacy_log" 2>/dev/null || true)" = "$legacy_mode_before" ]; then
+    ok "Bash audit 僅寫 metadata JSONL（0600），不持久化 command，且保留 legacy log"
+  else
+    bad "Bash audit 仍可能持久化 command、metadata schema/mode 不符，或改動 legacy log"
+  fi
+  audit_hash_before_invalid="$(git hash-object --no-filters -- "$audit_log")"
+  if printf '{' | HOME="$audit_home" bash hooks/audit-bash.sh >/dev/null 2>&1; then
+    bad "Bash audit 對 invalid payload 靜默回成功"
+  elif [ "$(git hash-object --no-filters -- "$audit_log")" = "$audit_hash_before_invalid" ]; then
+    ok "Bash audit 對 invalid payload 回 non-zero，既有 metadata 不變"
+  else
+    bad "Bash audit invalid-payload failure 改動既有 metadata"
+  fi
+  rm -r -- "$audit_home"
+fi
+
+audit_link_home="$(mktemp -d)" || audit_link_home=""
+if [ -z "$audit_link_home" ]; then
+  bad "Bash audit symlink canary 無法建立 temp HOME"
+else
+  mkdir -p "$audit_link_home/.claude"
+  audit_target="$audit_link_home/target.txt"
+  printf 'target-must-not-change\n' > "$audit_target"
+  target_hash_before="$(git hash-object --no-filters -- "$audit_target")"
+  ln -s "$audit_target" "$audit_link_home/.claude/audit-bash-metadata.log"
+  if printf '{"permission_mode":"auto","cwd":"/tmp"}' |
+       HOME="$audit_link_home" bash hooks/audit-bash.sh >/dev/null 2>&1; then
+    bad "Bash audit 接受 symlink log path"
+  elif [ "$(git hash-object --no-filters -- "$audit_target")" = "$target_hash_before" ]; then
+    ok "Bash audit 拒絕 symlink log path，target bytes 不變"
+  else
+    bad "Bash audit symlink rejection 後仍改動 target"
+  fi
+  rm -r -- "$audit_link_home"
+fi
+
+if ! rg -q 'Package manager：npm|無則取最新 LTS' CLAUDE.md &&
+   ! jq -e '.autoMode.environment[] | select(test("no production database|All database work targets local|Package manager: npm only"))' settings.json >/dev/null &&
+   rg -Fq 'Repo manifests／lockfiles／CI／task evidence 是 package manager 與 runtime 的 source of truth' CLAUDE.md &&
+   jq -e '.autoMode.environment | index("Repository config, manifests, lockfiles, CI, and the current task are the source of truth for package manager, database target, and credential/environment boundaries; assume neither local-only nor production access without evidence.") != null' settings.json >/dev/null; then
+  ok "package/runtime/database/credential 預設改由 repo evidence 決定"
+else
+  bad "仍有 npm-only、local-DB-only、no-production-credential 或 latest-LTS 全域假設"
+fi
+
+if jq -e '
+  (.permissions.allow | index("Bash(git restore --staged -- *)") != null) and
+  (.permissions.deny | index("Bash(git restore --staged *)") == null) and
+  (.permissions.deny | index("Bash(git restore *--source*)") != null) and
+  ([.autoMode.soft_deny[] | select(test("git restore[^\"]*--staged"))] | length == 0)
+' settings.json >/dev/null; then
+  unstage_dir="$(mktemp -d)" || unstage_dir=""
+  if [ -z "$unstage_dir" ]; then
+    bad "git restore --staged canary 無法建立 temp repo"
+  else
+    git -C "$unstage_dir" init -q
+    git -C "$unstage_dir" config user.email canary@example.invalid
+    git -C "$unstage_dir" config user.name canary
+    printf 'base\n' > "$unstage_dir/probe.txt"
+    git -C "$unstage_dir" add -- probe.txt
+    git -C "$unstage_dir" commit -qm baseline
+    printf 'changed\n' > "$unstage_dir/probe.txt"
+    git -C "$unstage_dir" add -- probe.txt
+    before_unstage="$(git -C "$unstage_dir" hash-object probe.txt)"
+    git -C "$unstage_dir" restore --staged -- probe.txt
+    after_unstage="$(git -C "$unstage_dir" hash-object probe.txt)"
+    if [ "$before_unstage" = "$after_unstage" ] &&
+       git -C "$unstage_dir" diff --cached --quiet -- probe.txt &&
+       ! git -C "$unstage_dir" diff --quiet -- probe.txt; then
+      ok "git restore --staged -- <path> 只 unstage，不改 worktree bytes"
+    else
+      bad "git restore --staged allow 或行為 canary 不符"
+    fi
+    rm -r -- "$unstage_dir"
+  fi
+else
+  bad "git restore staged/source permission contract 不符"
+fi
+
+launchctl_ok=1
+jq -e '
+  (.permissions.deny | index("Bash(launchctl *)") != null) and
+  (.permissions.deny | index("Bash(/bin/launchctl *)") != null) and
+  (.permissions.deny | index("Bash(env launchctl *)") != null) and
+  (.permissions.deny | index("Bash(env /bin/launchctl *)") != null) and
+  (.permissions.deny | index("Bash(/usr/bin/env launchctl *)") != null) and
+  (.permissions.deny | index("Bash(/usr/bin/env /bin/launchctl *)") != null) and
+  ([.permissions.deny[] | select(. == "Bash(* launchctl *)" or . == "Bash(* /bin/launchctl *)")] | length == 0) and
+  (.permissions.allow | index("Bash(~/.claude/hooks/launchctl-readonly.sh *)") != null) and
+  ([.permissions.allow[] | select(test("launchctl"))] | length == 1) and
+  (.permissions.ask | index("Bash(dangerouslyDisableSandbox:true)") != null) and
+  (.permissions.deny | index("Edit(~/.claude/CLAUDE.md)") != null) and
+  (.permissions.deny | index("Edit(~/.claude/settings.json)") != null) and
+  (.permissions.deny | index("Edit(~/.claude/hooks/**)") != null) and
+  (.sandbox.filesystem.allowWrite | index("/Users/pochientsai/.claude") == null) and
+  (.sandbox.filesystem.denyWrite | index("~/.claude/CLAUDE.md") != null) and
+  (.sandbox.filesystem.denyWrite | index("~/.claude/settings.json") != null) and
+  (.sandbox.filesystem.denyWrite | index("~/.claude/hooks") != null) and
+  ([.sandbox.network.allowMachLookup[] | select(test("launchd|launchctl"))] | length == 0)
+' settings.json >/dev/null || launchctl_ok=0
+for unsafe_launchctl in \
+  'getenv PATH' \
+  'print gui/501' \
+  'bootstrap gui/501 /tmp/unsafe.plist' \
+  'setenv KEY VALUE' \
+  'list extra'; do
+  # shellcheck disable=SC2086 # deliberate argv fixture
+  if bash hooks/launchctl-readonly.sh $unsafe_launchctl >/dev/null 2>&1; then
+    launchctl_ok=0
+  fi
+done
+if bash hooks/launchctl-readonly.sh version >/dev/null 2>&1; then
+  :
+elif [ "$?" -ne 69 ]; then
+  launchctl_ok=0
+fi
+if [ "$launchctl_ok" -eq 1 ]; then
+  ok "launchctl direct／common env spellings deny；protected read-only wrapper 與 unsandbox ask 阻止靜默升級"
+else
+  bad "launchctl protected wrapper／sandbox／unsandbox confirmation contract 不符"
+fi
+
+if rg -Fq 'Verification scope 與 risk tier 由 `~/.agents/skills/dev-workflow/SKILL.md` 定義' CLAUDE.md &&
+   ! rg -Fq 'Build／test／lint 與 task-specific probes 全跑' CLAUDE.md; then
+  ok "Opus 5 verification 指向 shared risk tiers，無 blanket rerun"
+else
+  bad "CLAUDE.md 重複 verification method 或仍強制 blanket verification"
+fi
+
+if rg -Fq '已核准 scope 內的低風險、可逆工作可自主完成' CLAUDE.md &&
+   grep -Fqx -- '- Delegation 收斂（不覆寫 [INT-4] 的數量自主）：幾個 tool call 可完成的工作不派 subagent；單一小任務不拆多個 subagent；S5 以外不另派 subagent 做 verification（S5 的獨立視角依 [S5-3] 保留）；已委派就不重跑其探索過程、不重推導其推理鏈，但其宣稱的結果仍依 [INT-4] 由 main context 以證據核對。' CLAUDE.md; then
+  ok "Opus 5 autonomy 依 risk/reversibility，delegation 收斂維持現況"
+else
+  bad "Opus 5 risk-based autonomy 或既有 delegation contract 漂移"
+fi
+
+if jq -e '.effortLevel == "high" and .alwaysThinkingEnabled == true' settings.json >/dev/null; then
+  ok "Claude default effort=high；thinking 保持啟用"
+else
+  bad "Claude effort 未套用 A/B 結果，或 thinking 被關閉"
 fi
 
 printf '\n%d PASS / %d FAIL\n' "$pass" "$fail"

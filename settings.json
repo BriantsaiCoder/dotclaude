@@ -17,11 +17,13 @@
       "Bash(git status:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
+      "Bash(git restore --staged -- *)",
       "Bash(git push --force-with-lease *)",
       "Bash(dotnet dev-certs *)",
       "Bash(gh *)",
       "Bash(jq *)",
       "Bash(sqlite3 *)",
+      "Bash(~/.claude/hooks/launchctl-readonly.sh *)",
       "mcp__plugin_context7_context7__resolve-library-id",
       "mcp__plugin_context7_context7__query-docs",
       "mcp__plugin_microsoft-docs_microsoft-learn__*",
@@ -32,6 +34,9 @@
       "mcp__plugin_github_github__pull_request_read",
       "mcp__plugin_github_github__get_file_contents",
       "mcp__plugin_github_github__get_me"
+    ],
+    "ask": [
+      "Bash(dangerouslyDisableSandbox:true)"
     ],
     "deny": [
       "Bash(cat .env*)",
@@ -47,15 +52,22 @@
       "Bash(git checkout .)",
       "Bash(git checkout -- *)",
       "Bash(git restore .)",
-      "Bash(git restore --staged *)",
-      "Bash(git restore --source *)",
+      "Bash(git restore *--source*)",
       "Bash(npm publish *)",
       "Bash(dotnet user-secrets *)",
       "Bash(launchctl *)",
+      "Bash(/bin/launchctl *)",
+      "Bash(env launchctl *)",
+      "Bash(env /bin/launchctl *)",
+      "Bash(/usr/bin/env launchctl *)",
+      "Bash(/usr/bin/env /bin/launchctl *)",
       "Bash(defaults write *)",
       "Bash(rm -rf *)",
       "Bash(sudo *)",
-      "Bash(git reset --hard *)"
+      "Bash(git reset --hard *)",
+      "Edit(~/.claude/CLAUDE.md)",
+      "Edit(~/.claude/settings.json)",
+      "Edit(~/.claude/hooks/**)"
     ],
     "defaultMode": "auto",
     "additionalDirectories": [
@@ -261,12 +273,16 @@
         "/Users/pochientsai/.cache",
         "/Users/pochientsai/Library/Caches",
         "/Users/pochientsai/.agents",
-        "/Users/pochientsai/.claude",
         "/Users/pochientsai/.copilot",
         "/Users/pochientsai/.codex",
         "/Users/pochientsai/Downloads/coding_agent_project",
         "/Users/pochientsai/.agent-browser",
         "/Users/pochientsai/Library/Application Support/Google/Chrome for Testing"
+      ],
+      "denyWrite": [
+        "~/.claude/CLAUDE.md",
+        "~/.claude/settings.json",
+        "~/.claude/hooks"
       ]
     },
     "excludedCommands": [
@@ -274,7 +290,7 @@
     ]
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "xhigh",
+  "effortLevel": "high",
   "autoCompactWindow": 1000000,
   "advisorModel": "opus",
   "autoUpdatesChannel": "latest",
@@ -300,16 +316,14 @@
       "Destructive NoSQL: mongosh drop/dropDatabase, redis-cli FLUSHDB/FLUSHALL, DETACH DATABASE.",
       "Publishing to external registries: npm/yarn/pnpm publish, dotnet nuget push, cargo publish, gem push, twine upload, docker/helm push to public registries.",
       "Modifying local trust or secret stores: dotnet user-secrets set/clear, dotnet dev-certs, security add-trusted-cert, keychain writes, update-ca-certificates.",
-      "Silently discarding uncommitted work: git checkout . / -- <path>, git restore . / --staged / --source, git reflog expire, git stash drop/clear.",
+      "Silently discarding uncommitted work: git checkout . / -- <path>, git restore . / --source, git reflog expire, git stash drop/clear.",
       "Database or migration destruction: dotnet ef database drop, ef migrations remove after apply, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
     ],
     "environment": [
       "$defaults",
-      "Personal macOS development machine; no production database or cloud credentials present.",
-      "All database work targets local Docker/Testcontainers or local service instances.",
+      "Repository config, manifests, lockfiles, CI, and the current task are the source of truth for package manager, database target, and credential/environment boundaries; assume neither local-only nor production access without evidence.",
       "Sandbox is enabled and autoAllowBashIfSandboxed is true — project workspace writable; package manager caches (npm, NuGet, .NET, Playwright browsers) also whitelisted via allowWrite.",
-      "Preferred stacks: .NET 8 / ASP.NET Core, EF Core, PostgreSQL, Vite + React/Vue, Tailwind, Docker Compose.",
-      "Package manager: npm only (no pnpm/yarn). E2E via Playwright. Containers via Docker Compose."
+      "Preferred stacks: .NET 8 / ASP.NET Core, EF Core, PostgreSQL, Vite + React/Vue, Tailwind, Docker Compose."
     ]
   }
 }
