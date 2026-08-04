@@ -478,13 +478,17 @@ else
   else
     bad "Bash audit 仍可能持久化 command、metadata schema/mode 不符，或改動 legacy log"
   fi
-  audit_hash_before_invalid="$(git hash-object --no-filters -- "$audit_log")"
-  if printf '{' | HOME="$audit_home" bash hooks/audit-bash.sh >/dev/null 2>&1; then
-    bad "Bash audit 對 invalid payload 靜默回成功"
-  elif [ "$(git hash-object --no-filters -- "$audit_log")" = "$audit_hash_before_invalid" ]; then
-    ok "Bash audit 對 invalid payload 回 non-zero，既有 metadata 不變"
+  if [ ! -f "$audit_log" ]; then
+    bad "Bash audit invalid-payload canary 缺少既有 metadata log"
   else
-    bad "Bash audit invalid-payload failure 改動既有 metadata"
+    audit_hash_before_invalid="$(git hash-object --no-filters -- "$audit_log")"
+    if printf '{' | HOME="$audit_home" bash hooks/audit-bash.sh >/dev/null 2>&1; then
+      bad "Bash audit 對 invalid payload 靜默回成功"
+    elif [ "$(git hash-object --no-filters -- "$audit_log")" = "$audit_hash_before_invalid" ]; then
+      ok "Bash audit 對 invalid payload 回 non-zero，既有 metadata 不變"
+    else
+      bad "Bash audit invalid-payload failure 改動既有 metadata"
+    fi
   fi
   rm -r -- "$audit_home"
 fi
