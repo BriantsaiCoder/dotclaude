@@ -542,22 +542,46 @@ else
   bad "git push guard 缺 pipefail，pipeline error 可能被後段命令遮蔽"
 fi
 
+push_probe_dir="$(mktemp -d)" || push_probe_dir=""
 _push_probe() { # $1=allow|deny $2=command
-  local want="$1" cmd="$2" out rc actual=allow
-  out=$(jq -nc --arg command "$cmd" '{tool_input:{command:$command},cwd:"."}' |
-    bash hooks/guard-git-push.sh --format=claude 2>&1 >/dev/null)
-  rc=$?
-  [ "$rc" -eq 2 ] && actual=deny
+  local want="$1" cmd="$2" rc actual
+  [ -n "$push_probe_dir" ] ||
+    { bad "git push guard 無法建立輸出檢查目錄"; return; }
+  if jq -nc --arg command "$cmd" '{tool_input:{command:$command},cwd:"."}' |
+    bash hooks/guard-git-push.sh --format=claude \
+      >"$push_probe_dir/stdout" 2>"$push_probe_dir/stderr"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -eq 0 ] && [ ! -s "$push_probe_dir/stdout" ] &&
+    [ ! -s "$push_probe_dir/stderr" ]; then
+    actual=allow
+  elif [ "$rc" -eq 2 ] && [ ! -s "$push_probe_dir/stdout" ] &&
+    [ -s "$push_probe_dir/stderr" ] &&
+    jq -se '
+      length == 1 and
+      .[0].decision == "block" and
+      (.[0].reason | type == "string" and length > 0)
+    ' "$push_probe_dir/stderr" >/dev/null 2>&1; then
+    actual=deny
+  elif [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
+    actual=BADOUTPUT
+  else
+    actual="BADEXIT($rc)"
+  fi
   if [ "$actual" = "$want" ]; then
     ok "git push guard $want: $cmd"
   else
-    bad "git push guard want=$want got=$actual rc=$rc: $cmd${out:+ — $out}"
+    bad "git push guard want=$want got=$actual rc=$rc: $cmd"
   fi
 }
 _push_probe allow 'git push --all origin'
+_push_probe allow 'git push --multiple origin backup'
 _push_probe deny  'git push --force --all origin'
 _push_probe deny  'git push --force-with-lease --all origin'
 _push_probe deny  'git push --mirror origin'
+[ -z "$push_probe_dir" ] || rm -rf "$push_probe_dir"
 
 audit_home="$(mktemp -d)" || audit_home=""
 if [ -z "$audit_home" ]; then
