@@ -21,7 +21,7 @@
 # MUST NOT 為消除此誤擋而改成解析 shell 語法區分「真指令 vs 字串」——那會開出
 # 引號規避路徑（false negative 對安全閘的代價遠高於 false positive）。
 # 遇到誤擋的正解：把該文字移出 command 字串（如 git commit -F <file>）。
-set -uf
+set -ufo pipefail
 
 FORMAT=claude   # 未指定時取 exit-2 語意（fail-closed：寧可誤擋不可誤放）
 for arg in "$@"; do

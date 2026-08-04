@@ -31,7 +31,7 @@ Verification scope 與 risk tier 由 `~/.agents/skills/dev-workflow/SKILL.md` �
 
 ### S6 CLOSEOUT
 
-S4、S5 全綠後才可 commit／push／open PR／merge／final closeout；merge 前 CI 綠且處理 bot review。預設 squash merge，合併後清理已合併 branch。
+S4、S5 全綠後才可 commit／push／open PR／merge／final closeout；merge gate 依 [T0-9] 與 shared `review-triage`。預設 squash merge，合併後清理已合併 branch。
 
 ## Claude adapter
 
