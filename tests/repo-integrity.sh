@@ -497,6 +497,25 @@ else
   bad "[T0-7] 仍對所有 schema change 強制完整 phases 或缺 SKIPPED boundary"
 fi
 
+if tier0_rule_has 8 \
+  'plan-first' \
+  '架構性' \
+  'High-risk' \
+  'external write' \
+  'destructive／costly／credential／payment／deployment／migration' \
+  'material scope expansion' \
+  'in-scope、local、reversible' \
+  'Low／Medium-risk' \
+  'session plan' \
+  '不需第二次確認' \
+  '觸發：將改檔或執行 side effect 且命中前述 protected gate' \
+  '例外：無' \
+  '驗證：protected gate 有 plan + 核准原句'; then
+  ok "[T0-8] Medium local reversible 工作不因 risk tier 再次等待確認"
+else
+  bad "[T0-8] 缺 Medium autonomy 或 High/protected stop boundary"
+fi
+
 if tier0_rule_has 9 \
   'current HEAD 有 applicable CI PASS' \
   '0 unresolved actionable findings' \
@@ -522,6 +541,53 @@ if grep -Fqx 'set -ufo pipefail' hooks/guard-git-push.sh; then
 else
   bad "git push guard 缺 pipefail，pipeline error 可能被後段命令遮蔽"
 fi
+
+push_probe_dir="$(mktemp -d)" || push_probe_dir=""
+_push_probe() { # $1=allow|deny $2=command
+  local want="$1" cmd="$2" rc actual
+  [ -n "$push_probe_dir" ] ||
+    { bad "git push guard 無法建立輸出檢查目錄"; return; }
+  if jq -nc --arg command "$cmd" '{tool_input:{command:$command},cwd:"."}' |
+    bash hooks/guard-git-push.sh --format=claude \
+      >"$push_probe_dir/stdout" 2>"$push_probe_dir/stderr"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -eq 0 ] && [ ! -s "$push_probe_dir/stdout" ] &&
+    [ ! -s "$push_probe_dir/stderr" ]; then
+    actual=allow
+  elif [ "$rc" -eq 2 ] && [ ! -s "$push_probe_dir/stdout" ] &&
+    [ -s "$push_probe_dir/stderr" ] &&
+    jq -se '
+      length == 1 and
+      .[0].decision == "block" and
+      (.[0].reason | type == "string" and length > 0)
+    ' "$push_probe_dir/stderr" >/dev/null 2>&1; then
+    actual=deny
+  elif [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
+    actual=BADOUTPUT
+  else
+    actual="BADEXIT($rc)"
+  fi
+  if [ "$actual" = "$want" ]; then
+    ok "git push guard $want: $cmd"
+  else
+    bad "git push guard want=$want got=$actual rc=$rc: $cmd"
+  fi
+}
+_push_probe allow 'git push --all origin'
+_push_probe allow 'git push --multiple origin backup'
+_push_probe deny  'git push --force --all origin'
+_push_probe deny  '{git,push,--force,origin,main}'
+_push_probe deny  '"C:\Program Files\Git\bin\git.exe" push --force origin main'
+_push_probe deny  '"C:\Program Files\Git\bin\GIT.EXE" push --force origin main'
+_push_probe deny  '"C:\Program Files\Git\bin\GIT.EXE" p\ush --for\ce origin main'
+_push_probe deny  'GIT push --force origin main'
+_push_probe allow 'legit.exe push --force origin main'
+_push_probe deny  'git push --force-with-lease --all origin'
+_push_probe deny  'git push --mirror origin'
+[ -z "$push_probe_dir" ] || rm -rf "$push_probe_dir"
 
 audit_home="$(mktemp -d)" || audit_home=""
 if [ -z "$audit_home" ]; then
@@ -675,7 +741,7 @@ else
   bad "CLAUDE.md 重複 verification method 或仍強制 blanket verification"
 fi
 
-if rg -Fq '已核准 scope 內的低風險、可逆工作可自主完成' CLAUDE.md &&
+if rg -Fq '已核准 scope 內的 Low／Medium-risk、local、reversible 工作可自主完成' CLAUDE.md &&
    grep -Fqx -- '- Delegation 收斂（不覆寫 [INT-4] 的數量自主）：幾個 tool call 可完成的工作不派 subagent；單一小任務不拆多個 subagent；S5 以外不另派 subagent 做 verification（S5 的獨立視角依 [S5-3] 保留）；已委派就不重跑其探索過程、不重推導其推理鏈，但其宣稱的結果仍依 [INT-4] 由 main context 以證據核對。' CLAUDE.md; then
   ok "Opus 5 autonomy 依 risk/reversibility，delegation 收斂維持現況"
 else

@@ -38,7 +38,7 @@ S4、S5 全綠後才可 commit／push／open PR／merge／final closeout；merge
 - plan = EnterPlanMode；todo = TodoWrite；子代理 = Task／Agent。
 - `code-review` 的 Standards／Spec fan-out 依 shared [INT-4]；前端視覺 review 可用 Claude-local `uiux-reviewer`。
 - launchctl read-only 查詢只走受保護的 `~/.claude/hooks/launchctl-readonly.sh <subcommand>`；direct／common env-spelled launchctl deny，其他拼法不預先核准，任何 unsandbox retry 必須人工確認。
-- 已核准 scope 內的低風險、可逆工作可自主完成；commit／PR／merge、destructive／shared-state／credential 操作遵循 `dev-workflow` authorization gate。
+- 已核准 scope 內的 Low／Medium-risk、local、reversible 工作可自主完成；Medium 留 session plan；commit／PR／merge 與 protected side effect 仍走 `dev-workflow` authorization gate。
 - Secrets 只用 env／secret manager；log／chat 只回報 set／unset。
 
 ## On-demand stack rules
