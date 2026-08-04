@@ -81,6 +81,7 @@ SCAN_CMD=${SCAN_CMD//\\/}
 SCAN_CMD=${SCAN_CMD//\$/}
 SCAN_CMD=${SCAN_CMD//\(/}
 SCAN_CMD=${SCAN_CMD//\)/}
+SCAN_CMD=${SCAN_CMD//[\{\},]/ }
 case "$SCAN_CMD" in *git*push*) ;; *) exit 0 ;; esac
 check_target() {
   case "$1" in
