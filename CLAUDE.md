@@ -23,7 +23,6 @@ ponytail 注入=通用慣例；測試敘述 MUST NOT 覆寫 [T0-2]／dev-workflo
 ### Authorization
 
 - Delegation：依 shared `dev-workflow` [INT-4] 由 AI 自主判定，無須另問。
-- Delegation 收斂（不覆寫 [INT-4] 的數量自主）：幾個 tool call 可完成的工作不派 subagent；單一小任務不拆多個 subagent；S5 以外不另派 subagent 做 verification（S5 的獨立視角依 [S5-3] 保留）；已委派就不重跑其探索過程、不重推導其推理鏈，但其宣稱的結果仍依 [INT-4] 由 main context 以證據核對。
 
 ### S4 VERIFY
 
@@ -31,14 +30,14 @@ Verification scope 與 risk tier 由 `~/.agents/skills/dev-workflow/SKILL.md` �
 
 ### S6 CLOSEOUT
 
-S4、S5 全綠後才可 commit／push／open PR／merge／final closeout；merge gate 依 [T0-9] 與 shared `review-triage`。預設 squash merge，合併後清理已合併 branch。
+Local checkpoint commit 僅依 shared `authorization-matrix`；push／open PR／merge／final closeout 仍依 shared [INT-1]、[T0-9] 與 `review-triage`。預設 squash merge，合併後清理已合併 branch。
 
 ## Claude adapter
 
 - plan = EnterPlanMode；todo = TodoWrite；子代理 = Task／Agent。
 - `code-review` 的 Standards／Spec fan-out 依 shared [INT-4]；前端視覺 review 可用 Claude-local `uiux-reviewer`。
 - launchctl read-only 查詢只走受保護的 `~/.claude/hooks/launchctl-readonly.sh <subcommand>`；direct／common env-spelled launchctl deny，其他拼法不預先核准，任何 unsandbox retry 必須人工確認。
-- 已核准 scope 內的 Low／Medium-risk、local、reversible 工作可自主完成；Medium 留 session plan；commit／PR／merge 與 protected side effect 仍走 `dev-workflow` authorization gate。
+- 已核准 scope 內的 Low／Medium-risk、local、reversible 工作可自主完成；Medium 留 session plan；publication 與 protected side effect 仍走 `dev-workflow` authorization gate。
 - Secrets 只用 env／secret manager；log／chat 只回報 set／unset。
 
 ## On-demand stack rules

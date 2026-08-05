@@ -222,7 +222,7 @@ else
 fi
 
 # 結構性 marker 留在 CLAUDE.md：它們是 host adapter 自己的骨架，不是 shared method。
-for marker in dev-workflow S4 S5 S6 code-review; do
+for marker in dev-workflow S4 S6 code-review; do
   rg -q "$marker" CLAUDE.md || bad "CLAUDE.md thin route 缺失: $marker"
 done
 
@@ -530,7 +530,7 @@ else
   bad "[T0-9] 缺 current-head outcome 或 bot UNAVAILABLE independent-review fallback"
 fi
 
-if rg -Fq 'merge gate 依 [T0-9] 與 shared `review-triage`' CLAUDE.md; then
+if rg -q 'push／open PR／merge／final closeout.*\[T0-9\].*review-triage' CLAUDE.md; then
   ok "Claude S6 只引用 [T0-9]/review-triage，不另加 blanket bot gate"
 else
   bad "Claude S6 未指向 [T0-9]/review-triage"
@@ -742,16 +742,36 @@ else
 fi
 
 if rg -Fq '已核准 scope 內的 Low／Medium-risk、local、reversible 工作可自主完成' CLAUDE.md &&
-   grep -Fqx -- '- Delegation 收斂（不覆寫 [INT-4] 的數量自主）：幾個 tool call 可完成的工作不派 subagent；單一小任務不拆多個 subagent；S5 以外不另派 subagent 做 verification（S5 的獨立視角依 [S5-3] 保留）；已委派就不重跑其探索過程、不重推導其推理鏈，但其宣稱的結果仍依 [INT-4] 由 main context 以證據核對。' CLAUDE.md; then
-  ok "Opus 5 autonomy 依 risk/reversibility，delegation 收斂維持現況"
+   grep -Fqx -- '- Delegation：依 shared `dev-workflow` [INT-4] 由 AI 自主判定，無須另問。' CLAUDE.md &&
+   ! rg -q '幾個 tool call 可完成的工作不派 subagent|單一小任務不拆多個 subagent|S5 以外不另派 subagent' CLAUDE.md; then
+  ok "Opus 5 autonomy 依 risk/reversibility；delegation 僅由 shared INT-4 routing"
 else
-  bad "Opus 5 risk-based autonomy 或既有 delegation contract 漂移"
+  bad "Opus 5 risk-based autonomy 或 shared delegation routing 漂移"
 fi
 
-if jq -e '.effortLevel == "high" and .alwaysThinkingEnabled == true' settings.json >/dev/null; then
-  ok "Claude default effort=high；thinking 保持啟用"
+if jq -e '
+  .model == "default" and
+  .advisorModel == "opus" and
+  .effortLevel == "high" and
+  .alwaysThinkingEnabled == true
+' settings.json >/dev/null; then
+  ok "Claude main model=default；advisor=opus；effort=high；thinking 啟用"
 else
-  bad "Claude effort 未套用 A/B 結果，或 thinking 被關閉"
+  bad "Claude model／advisor／effort／thinking contract 漂移"
+fi
+
+if jq -e '.enableAllProjectMcpServers == false' settings.json >/dev/null; then
+  ok "Project MCP 不會未經個別啟用而全數載入"
+else
+  bad "enableAllProjectMcpServers 必須明示 false"
+fi
+
+if rg -Fq 'Local checkpoint commit 僅依 shared `authorization-matrix`' CLAUDE.md &&
+   rg -Fq 'push／open PR／merge／final closeout 仍依 shared [INT-1]' CLAUDE.md &&
+   ! rg -q 'S4、S5 全綠後才可 commit|commit／PR／merge.*authorization gate' CLAUDE.md; then
+  ok "Local checkpoint 與 publication gate 分離"
+else
+  bad "checkpoint 仍被 publication gate 綁住，或未指向 shared authorization matrix"
 fi
 
 printf '\n%d PASS / %d FAIL\n' "$pass" "$fail"

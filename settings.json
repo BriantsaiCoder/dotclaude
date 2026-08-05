@@ -204,6 +204,8 @@
     }
   },
   "language": "zh-TW",
+  "model": "default",
+  "enableAllProjectMcpServers": false,
   "sandbox": {
     "enabled": true,
     "failIfUnavailable": true,
