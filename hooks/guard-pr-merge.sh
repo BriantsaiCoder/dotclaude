@@ -95,6 +95,19 @@ if [ "${1:-}" = "--selftest" ]; then
   run 'gh pr create 放行'        'gh pr create --fill'            FAIL_CI     0
   run 'gh pr view 放行'          'gh pr view 42'                  FAIL_CI     0
   run '無關指令放行'             'dotnet build -c Release'        FAIL_CI     0
+  # 誤擋防護：子字串比對時代這四項都會被擋，且擋得毫無道理。gate 一律用 FAIL_CI，
+  # 所以 exit 0 只可能來自「沒被判定成合併意圖」，不可能來自 gate 放行。
+  # shellcheck disable=SC2016 # $( ) 是測試字面，不得展開
+  run '--left-right+printf 不誤擋' 'git rev-list --left-right main...origin/main; printf "%s" $(echo x)' FAIL_CI 0
+  # shellcheck disable=SC2016
+  run 'highlight+prefix 不誤擋'  'grep --highlight --prefix=x $(pwd)' FAIL_CI  0
+  # gh pr view --json 的 merge* 欄位全列在此（2026-08-06 用 `gh pr view --json` 取得完整
+  # 清單）：五個都含 merge 子字串、五個都不等於 merge token。子字串比對會把它們全部誤判
+  # 成合併意圖，實測擋過兩次。Copilot 於 PR #14 另舉 `--json merge`，但 gh 沒有這個欄位，
+  # 該形式不是合法指令。
+  run 'gh pr view merge* 欄位放行' 'gh pr view 42 --json mergeCommit,mergeStateStatus,mergeable,mergedAt,mergedBy' FAIL_CI 0
+  # 收窄成 token 後，完整路徑呼叫仍須偵測得到——否則就從誤擋修成了漏擋。
+  run 'gh 完整路徑仍偵測'        '/opt/homebrew/bin/gh pr merge 42' FAIL_CI   2
   # jq fallback canary：jq 不可用或 payload 壞掉時走的那條路徑，也必須用同一份
   # 正規化結果比對。若只比對原始字串，line-continuation 拆開的意圖在 jq 缺席時
   # 完全不會被偵測——防線在最該保守的情境下反而最寬。傳入無效 JSON 觸發同一分支。
@@ -210,6 +223,36 @@ has_subst() {
   return 1
 }
 
+# gh 與 pr 必須是**獨立 token** 才算 gh 指令。原本寫成 `*[Gg][Hh]*pr*` 子字串比對，
+# 於是 `git rev-list --left-right`（--left-ri"gh"t）配上 `printf`（"pr"intf）就湊出一次
+# 命中——2026-08-06 實測誤擋兩次，兩次都與 GitHub 毫無關係。highlight+--prefix、
+# through+props、weight+preview 都會中。誤擋看起來像故障，而長期被誤擋的守門遲早被
+# 關掉，等於守不住。
+#
+# token 化不會鬆掉 substitution 防線：`gh pr m$(printf er)ge 42` 裡的 gh 與 pr 本來就是
+# 完整 token，照樣命中、照樣走保守拒絕。收窄的只有「字裡剛好有這兩串字母」那一類。
+#
+# 迴圈刻意不對 $1 加引號——就是要 word splitting 來切 token。檔首 `set -f` 已關閉
+# globbing，所以 * 與 ? 不會被展開成檔名。
+has_gh_pr() { # 1=已 normalize 的字串；2 非空時額外要求 merge token
+  local need_merge=${2:-} stage=0 t
+  for t in $1; do
+    case "$stage" in
+      # gh 可執行檔認裸 token 與完整路徑（/opt/homebrew/bin/gh）。
+      0) case "$t" in [Gg][Hh]|*/[Gg][Hh]) stage=1 ;; esac ;;
+      # gh 與 pr 之間可以夾全域選項（gh --repo o/r pr merge 42），所以持續往後掃。
+      1) if [ "$t" = pr ]; then
+           stage=2
+           [ -n "$need_merge" ] || return 0
+         fi ;;
+      # 只認精確等於 merge 的 token。`gh pr view 42 --json state,mergeCommit` 的
+      # mergeCommit 不是合併動作，子字串比對會把它誤判成 merge——實測擋過一次。
+      2) [ "$t" = merge ] && return 0 ;;
+    esac
+  done
+  return 1
+}
+
 JQ="$(command -v jq 2>/dev/null || true)"
 INPUT="$(cat)"
 
@@ -223,10 +266,8 @@ if [ -z "$JQ" ] || ! CMD=$(printf '%s' "$INPUT" | "$JQ" -r '.tool_input.command 
   esac
   # substitution 判定也必須在 fallback 生效，否則 jq 缺席時 `m$(printf er)ge` 直接通過——
   # 那是兩層防護同時失效，正好落在最該保守的情境。
-  if has_subst "$INPUT"; then
-    case "$SCAN_INPUT" in
-      *[Gg][Hh]*pr*) deny "[T0-9] payload 無法解析且指令含 command substitution，無法判定是否為合併操作，保守拒絕。" ;;
-    esac
+  if has_subst "$INPUT" && has_gh_pr "$SCAN_INPUT"; then
+    deny "[T0-9] payload 無法解析且指令含 command substitution，無法判定是否為合併操作，保守拒絕。"
   fi
   exit 0
 fi
@@ -234,10 +275,8 @@ fi
 
 SCAN=$(normalize "$CMD")
 
-if has_subst "$CMD"; then
-  case "$SCAN" in
-    *[Gg][Hh]*pr*) deny "[T0-9] 指令含 command substitution，無法可靠判定是否為合併操作，保守拒絕。請改寫成不含 \$( )、\${ } 或反引號的明確形式。" ;;
-  esac
+if has_subst "$CMD" && has_gh_pr "$SCAN"; then
+  deny "[T0-9] 指令含 command substitution，無法可靠判定是否為合併操作，保守拒絕。請改寫成不含 \$( )、\${ } 或反引號的明確形式。"
 fi
 
 # 複合命令切段（; | & 與 newline 皆為段界），只在含 gh…pr…merge 的那一段裡解析。
@@ -252,8 +291,8 @@ IFS="$SEP" read -r -a segments <<< "$CMD_SEGMENTS"
 
 merge_seg=""
 for seg in "${segments[@]}"; do
-  # gh 可執行檔認裸 token 與完整路徑；三個 token 必須同段出現才算執行意圖。
-  case "$seg" in *[Gg][Hh]*pr*merge*) merge_seg=$seg; break ;; esac
+  # gh、pr、merge 三者都必須是同段內的獨立 token，順序也要對，才算合併意圖。
+  if has_gh_pr "$seg" merge; then merge_seg=$seg; break; fi
 done
 [ -n "$merge_seg" ] || exit 0
 
