@@ -42,9 +42,12 @@ if [ -f settings.json ]; then
     *) bad "permissions.defaultMode 非已知值: $mode" ;;
   esac
 
+  # ultracode 曾與 workflowSizeGuideline 一起釘在這裡當成本閘門，2026-08-06 移除：它是使用者
+  # 可經 /config 或 prompt 逐次開關的偏好，開了之後 Claude Code 會寫回 settings.json，於是每次
+  # 調整都變成 CI 紅燈。workflowSizeGuideline 留著——那個鍵不會被互動操作自動寫回，釘死不會誤傷。
+  # 代價講明：ultracode 被調開不再有任何警告，成本控制改由 /config 與使用者自己把關。
   if jq -e '
     ((has("workflowSizeGuideline") | not) or .workflowSizeGuideline == "unrestricted") and
-    ((has("ultracode") | not) or .ultracode == false) and
     (.enabledPlugins["context7@claude-plugins-official"] == true) and
     (.permissions.allow | index("mcp__plugin_context7_context7__resolve-library-id") != null) and
     (.permissions.allow | index("mcp__plugin_context7_context7__query-docs") != null) and
@@ -52,7 +55,7 @@ if [ -f settings.json ]; then
   ' settings.json >/dev/null; then
     ok "Context7 只預先核准兩個 read-only tools"
   else
-    bad "Context7 plugin 必須 enabled 且 permission 為兩個 exact tools；workflowSizeGuideline 須 unrestricted／unset，ultracode 須 false／unset"
+    bad "Context7 plugin 必須 enabled 且 permission 為兩個 exact tools；workflowSizeGuideline 須 unrestricted／unset"
   fi
 fi
 
@@ -702,7 +705,15 @@ jq -e '
   ([.permissions.deny[] | select(. == "Bash(* launchctl *)" or . == "Bash(* /bin/launchctl *)")] | length == 0) and
   (.permissions.allow | index("Bash(~/.claude/hooks/launchctl-readonly.sh *)") != null) and
   ([.permissions.allow[] | select(test("launchctl"))] | length == 1) and
-  (.permissions.ask | index("Bash(dangerouslyDisableSandbox:true)") != null) and
+  # unsandbox 升級不得「無人把關地」發生。把關可以是三種形狀之一，斷言只認其中一種
+  # 會把換成另一種誤判為防線退化：
+  #   ask 規則                        — 每次 prompt，人工放行（無人值守會卡死）
+  #   allowUnsandboxedCommands:false  — 參數被完全忽略，根本沒有升級路徑
+  #   defaultMode:auto                — classifier 逐次評估，不 prompt 也不靜默放行
+  # 三者皆無才是真的退化：那代表 unsandboxed retry 可以無條件執行。
+  ((.permissions.ask | index("Bash(dangerouslyDisableSandbox:true)") != null)
+    or (.sandbox.allowUnsandboxedCommands == false)
+    or (.permissions.defaultMode == "auto")) and
   (.permissions.deny | index("Edit(~/.claude/CLAUDE.md)") != null) and
   (.permissions.deny | index("Edit(~/.claude/settings.json)") != null) and
   (.permissions.deny | index("Edit(~/.claude/hooks/**)") != null) and
@@ -729,7 +740,7 @@ elif [ "$?" -ne 69 ]; then
   launchctl_ok=0
 fi
 if [ "$launchctl_ok" -eq 1 ]; then
-  ok "launchctl direct／common env spellings deny；protected read-only wrapper 與 unsandbox ask 阻止靜默升級"
+  ok "launchctl direct／common env spellings deny；protected read-only wrapper 與 unsandbox 把關（ask／strict sandbox／classifier 三者之一）阻止靜默升級"
 else
   bad "launchctl protected wrapper／sandbox／unsandbox confirmation contract 不符"
 fi
@@ -749,13 +760,17 @@ else
   bad "Opus 5 risk-based autonomy 或 shared delegation routing 漂移"
 fi
 
+# model 與 effortLevel 是使用者可經 /model、/config 調整的 session 偏好，Claude Code 調完會
+# 自動寫回 settings.json。釘死單一值會讓每次調整都變成 CI 紅燈——2026-08-05 起磁碟上已是
+# claude-opus-5／xhigh，這條在下次 commit 就會 FAIL。改釘「允許集合」：仍擋得住掉回未指定
+# 或降級到低 effort 的漂移，但不再把使用者的正常調整當成 drift。
 if jq -e '
-  .model == "default" and
+  (.model | IN("default", "claude-opus-5")) and
   .advisorModel == "opus" and
-  .effortLevel == "high" and
+  (.effortLevel | IN("high", "xhigh")) and
   .alwaysThinkingEnabled == true
 ' settings.json >/dev/null; then
-  ok "Claude main model=default；advisor=opus；effort=high；thinking 啟用"
+  ok "Claude main model 在允許集合內；advisor=opus；effort≥high；thinking 啟用"
 else
   bad "Claude model／advisor／effort／thinking contract 漂移"
 fi
