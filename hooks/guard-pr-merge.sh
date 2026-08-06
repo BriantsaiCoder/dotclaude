@@ -66,9 +66,22 @@ if [ "${1:-}" = "--selftest" ]; then
   # merge 之後才取編號，選項與其值要跳過
   run 'merge 後才取編號'         'gh pr merge --repo o/r 42'      FAIL_CI     2
   run '引號規避仍擋'             'gh "pr" merge'                  PASS        2
+  # bash 解析後照樣執行，正規化前 *pr*merge* 卻看不到連續的 merge——fail-open
+  run 'line-continuation 拆字仍擋' "$(printf 'gh pr mer\\\nge 42')" FAIL_CI    2
+  # shellcheck disable=SC2016 # $( ) 是測試字面，不得展開
+  run '$ ( ) 遮蔽仍取得編號'     'gh pr merge $(echo 42)'         FAIL_CI     2
   run 'gh pr create 放行'        'gh pr create --fill'            FAIL_CI     0
   run 'gh pr view 放行'          'gh pr view 42'                  FAIL_CI     0
   run '無關指令放行'             'dotnet build -c Release'        FAIL_CI     0
+  # jq fallback canary：jq 不可用或 payload 壞掉時走的那條路徑，也必須用同一份
+  # 正規化結果比對。若只比對原始字串，line-continuation 拆開的意圖在 jq 缺席時
+  # 完全不會被偵測——防線在最該保守的情境下反而最寬。傳入無效 JSON 觸發同一分支。
+  if printf 'not-json gh pr mer\\\nge 42' | PR_REVIEW_GATE="$d/gate" "$0" >/dev/null 2>&1; then
+    printf '  FAIL  jq fallback 未偵測正規化後的意圖（fail-open）\n'; f=$((f+1))
+  else
+    printf '  PASS  jq fallback 用正規化結果比對\n'; p=$((p+1))
+  fi
+
   # cwd canary：payload 的 .cwd 是 session 目錄，指令若寫成 `cd X && …`，實際執行
   # 目錄是 X。取錯目錄時 pr-review-gate 查的是另一個 repo 的同號 PR——那不會報錯，
   # 只會安靜地回一個錯的答案，所以必須用「兩個目錄回不同 STATE」的 gate 才測得到。
@@ -133,22 +146,40 @@ deny() {
   exit 2
 }
 
+# 比對前的正規化，與 guard-git-push.sh 同一套。順序是必要的：line continuation
+# 必須最先移除，否則後面剝掉反斜線會留下裸 newline，把 `mer\<newline>ge` 永遠切成兩半。
+# 剝 $ ( ) 是為了讓 `m$(printf er)ge` 這類 command substitution 少一層遮蔽。
+#
+# 2026-08-06 Copilot review 指出：只剝引號與反斜線時，`gh pr mer\<newline>ge 42`
+# bash 解析後照樣執行，但 `*pr*merge*` 看不到連續的 merge——那是 fail-open，不是誤擋。
+normalize() {
+  local s=$1
+  s=${s//$'\\\n'/}
+  s=${s//\"/}
+  s=${s//\'/}
+  s=${s//\\/}
+  s=${s//\$/}
+  s=${s//\(/}
+  s=${s//\)/}
+  printf '%s' "$s"
+}
+
 JQ="$(command -v jq 2>/dev/null || true)"
 INPUT="$(cat)"
 
-# jq 缺席時不能靜默放行，但也不能一律拒絕。只對原始 payload 就含 merge 意圖的保守拒絕。
+# jq 缺席時不能靜默放行，但也不能一律拒絕。只對含 merge 意圖的 payload 保守拒絕——
+# 而「含意圖」必須用與正常路徑同一份正規化結果判斷，否則 jq 不可用時同樣的
+# line-continuation 規避完全不會被偵測，防線在最需要保守的情境下反而最寬。
+SCAN_INPUT=$(normalize "$INPUT")
 if [ -z "$JQ" ] || ! CMD=$(printf '%s' "$INPUT" | "$JQ" -r '.tool_input.command // empty' 2>/dev/null); then
-  case "$INPUT" in
+  case "$SCAN_INPUT" in
     *"pr"*"merge"*) deny "[T0-9] jq 不可用或 payload 解析失敗，無法驗證 merge gate，保守拒絕。" ;;
   esac
   exit 0
 fi
 [ -z "$CMD" ] && exit 0
 
-# 剝引號再比對，避免 `gh "pr" merge` 之類規避。
-SCAN=${CMD//\"/}
-SCAN=${SCAN//\'/}
-SCAN=${SCAN//\\/}
+SCAN=$(normalize "$CMD")
 
 # 複合命令切段（; | & 與 newline 皆為段界），只在含 gh…pr…merge 的那一段裡解析。
 # 對整串取「第一個純數字」會被前段搶走：`echo 99 && gh pr merge 42` 會拿 99 去查，
