@@ -765,9 +765,9 @@ fi
 # claude-opus-5／xhigh，這條在下次 commit 就會 FAIL。改釘「允許集合」：仍擋得住掉回未指定
 # 或降級到低 effort 的漂移，但不再把使用者的正常調整當成 drift。
 if jq -e '
-  (.model | IN("default", "claude-opus-5")) and
+  (.model == "default" or .model == "claude-opus-5") and
   .advisorModel == "opus" and
-  (.effortLevel | IN("high", "xhigh")) and
+  (.effortLevel == "high" or .effortLevel == "xhigh") and
   .alwaysThinkingEnabled == true
 ' settings.json >/dev/null; then
   ok "Claude main model 在允許集合內；advisor=opus；effort≥high；thinking 啟用"

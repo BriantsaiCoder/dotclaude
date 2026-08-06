@@ -69,6 +69,31 @@ if [ "${1:-}" = "--selftest" ]; then
   run 'gh pr create 放行'        'gh pr create --fill'            FAIL_CI     0
   run 'gh pr view 放行'          'gh pr view 42'                  FAIL_CI     0
   run '無關指令放行'             'dotnet build -c Release'        FAIL_CI     0
+  # cwd canary：payload 的 .cwd 是 session 目錄，指令若寫成 `cd X && …`，實際執行
+  # 目錄是 X。取錯目錄時 pr-review-gate 查的是另一個 repo 的同號 PR——那不會報錯，
+  # 只會安靜地回一個錯的答案，所以必須用「兩個目錄回不同 STATE」的 gate 才測得到。
+  mkdir -p "$d/right" "$d/wrong"
+  {
+    printf '#!/bin/sh\n'
+    # shellcheck disable=SC2016 # $PWD 要原樣寫進 fake gate，此處不得展開
+    printf 'case "$PWD" in *right) printf "STATE=PASS pr=42 head=abc\\n" ;; *) printf "STATE=FAIL_CI pr=42 head=abc\\n" ;; esac\n'
+  } > "$d/cwdgate"
+  chmod +x "$d/cwdgate"
+  if jq -cn --arg cmd "cd $d/right && gh pr merge 42" --arg cwd "$d/wrong" \
+       '{tool_input:{command:$cmd},cwd:$cwd}' |
+       PR_REVIEW_GATE="$d/cwdgate" "$0" >/dev/null 2>&1; then
+    printf '  PASS  cd 目標優先於 payload.cwd\n'; p=$((p+1))
+  else
+    printf '  FAIL  cwd 仍取 payload.cwd——會查到別的 repo 的同號 PR\n'; f=$((f+1))
+  fi
+  if jq -cn --arg cmd 'gh pr merge 42' --arg cwd "$d/right" \
+       '{tool_input:{command:$cmd},cwd:$cwd}' |
+       PR_REVIEW_GATE="$d/cwdgate" "$0" >/dev/null 2>&1; then
+    printf '  PASS  無 cd 時退回 payload.cwd\n'; p=$((p+1))
+  else
+    printf '  FAIL  無 cd 時未使用 payload.cwd\n'; f=$((f+1))
+  fi
+
   # json_escape canary：reason 會夾帶 pr-review-gate 的原始輸出，那可能含雙引號或反斜線
   # （GraphQL 錯誤訊息就常有）。只驗 exit code 會漏掉這種失敗——非法 JSON 一樣 exit 2，
   # 但 host 解析不了 block 回覆，等於靜默失去這道防線。所以這項直接驗輸出可被 jq 解析。
@@ -162,12 +187,29 @@ done
 GATE="${PR_REVIEW_GATE:-$HOME/.agents/bin/pr-review-gate}"
 [ -x "$GATE" ] || deny "[T0-9] 找不到可執行的 pr-review-gate（${GATE}），無法驗證 merge gate。"
 
-# pr-review-gate 用 cwd 解析 repo，所以必須切到 PostToolUse payload 帶的 cwd，
-# 否則會查到別的 repo 的同號 PR（該工具註解裡記錄過這個實測坑）。
+# pr-review-gate 用 cwd 解析 repo，查錯目錄就會查到別的 repo 的同號 PR——它自己的
+# 註解記錄過這個實測坑，而本 hook 第一版正好踩了：payload 的 .cwd 是 **session 目錄**，
+# 指令若寫成 `cd X && gh pr merge N`，實際執行目錄是 X，兩者不同。
+#
+# 2026-08-06 實測：session 在 Anormal_Unit_Detection、指令為
+# `cd ~/.claude && gh pr merge 14`，hook 切到 session 目錄去查 #14，回報
+# 「Could not resolve to a PullRequest」。反向更危險：session 目錄那個 repo 若剛好
+# 有同號且 STATE=PASS 的 PR，這個 gate 會安靜地放行它根本沒驗過的目標 PR。
+#
+# 因此以「merge 段之前最後一個 cd 的目標」為準，沒有 cd 時才退回 payload 的 .cwd。
 CWD=$(printf '%s' "$INPUT" | "$JQ" -r '.cwd // empty' 2>/dev/null)
-if [ -n "$CWD" ] && [ -d "$CWD" ]; then
-  cd "$CWD" || deny "[T0-9] 無法切換到 payload 指定的 cwd（${CWD}），pr-review-gate 會查到錯的 repo，保守拒絕。"
-fi
+for seg in "${segments[@]}"; do
+  [ "$seg" = "$merge_seg" ] && break
+  seg_toks=()
+  read -r -a seg_toks <<< "$seg"
+  if [ "${seg_toks[0]:-}" = cd ] && [ -n "${seg_toks[1]:-}" ]; then
+    CWD=${seg_toks[1]}
+  fi
+done
+CWD=${CWD/#\~/$HOME}
+[ -n "$CWD" ] || deny "[T0-9] 無法判定合併指令的執行目錄，pr-review-gate 會查到錯的 repo，保守拒絕。"
+[ -d "$CWD" ] || deny "[T0-9] 合併指令的執行目錄不存在（${CWD}），無法驗證 gate。"
+cd "$CWD" || deny "[T0-9] 無法切換到執行目錄（${CWD}），pr-review-gate 會查到錯的 repo，保守拒絕。"
 
 OUT=$("$GATE" "$PR" 2>&1) || true
 case "$OUT" in
