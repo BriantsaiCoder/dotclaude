@@ -48,6 +48,11 @@ if [ "${1:-}" = "--selftest" ]; then
     else printf '  FAIL  %s（期望 exit=%s 實得 %s）\n' "$1" "$4" "$g"; f=$((f+1)); fi
   }
   run 'STATE=PASS 放行'          'gh pr merge 42'                 PASS        0
+  # 降級狀態：gate 確定 CI run 根本沒被建立（不是還在跑）時回這個，本 hook 明示接受。
+  run 'STATE=PASS_NO_CI 放行'    'gh pr merge 42'                 PASS_NO_CI  0
+  # 這項守的是「明示」本身：舊版寫 STATE=PASS* 前綴 glob，gate 那邊新增任何以 PASS 開頭
+  # 的狀態都會被無聲放行，沒有人需要同意。收緊成精確比對後，未列入的一律擋。
+  run '未列入的 PASS_ 前綴仍擋'  'gh pr merge 42'                 PASS_FUTURE 2
   run 'STATE=FINDINGS 擋'        'gh pr merge 42'                 FINDINGS    2
   run 'STATE=WAIT_CI 擋'         'gh pr merge 42'                 WAIT_CI     2
   run 'STATE=WAIT_REVIEW 擋'     'gh pr merge 42'                 WAIT_REVIEW 2
@@ -159,6 +164,20 @@ if [ "${1:-}" = "--selftest" ]; then
   else
     printf '  FAIL  無 cd 時未使用 payload.cwd\n'; f=$((f+1))
   fi
+
+  # 輸出格式解耦 canary：gate 目前每一行都帶 pr= 等欄位，只比對「STATE=X 後面接空白」也會過。
+  # 但那是把 hook 綁在 gate 現在的格式上——gate 哪天改成只印 STATE，兩個放行狀態都會被誤擋，
+  # 而且是沉默的：merge 停住，理由看起來像 gate 不通過。用只印 STATE 的 fake gate 守住這件事。
+  for st in PASS PASS_NO_CI; do
+    printf '#!/bin/sh\nprintf "STATE=%s\\n"\n' "$st" > "$d/gate"
+    chmod +x "$d/gate"
+    if jq -cn --arg cmd 'gh pr merge 42' --arg cwd "$d/repo" '{tool_input:{command:$cmd},cwd:$cwd}' |
+         PR_REVIEW_GATE="$d/gate" "$0" >/dev/null 2>&1; then
+      printf '  PASS  STATE=%s 無尾隨欄位仍放行\n' "$st"; p=$((p+1))
+    else
+      printf '  FAIL  STATE=%s 無尾隨欄位被誤擋\n' "$st"; f=$((f+1))
+    fi
+  done
 
   # json_escape canary：reason 會夾帶 pr-review-gate 的原始輸出，那可能含雙引號或反斜線
   # （GraphQL 錯誤訊息就常有）。只驗 exit code 會漏掉這種失敗——非法 JSON 一樣 exit 2，
@@ -365,8 +384,23 @@ CWD=${CWD/#\~/$HOME}
 [ -d "$CWD" ] || deny "[T0-9] 合併指令的執行目錄不存在（${CWD}），無法驗證 gate。"
 cd "$CWD" || deny "[T0-9] 無法切換到執行目錄（${CWD}），pr-review-gate 會查到錯的 repo，保守拒絕。"
 
+# 放行狀態逐一列出，不用 `STATE=PASS*` 這種前綴 glob。前綴 glob 會自動吃掉未來任何以
+# PASS 開頭的新狀態——gate 那邊新增一個 STATE=PASS_ANYTHING，這裡就無聲放行了，沒有人
+# 需要同意。降級路徑正是這種形狀，所以它必須是**明寫的一條**，不是 glob 順便涵蓋到的。
+#
+# 每個狀態兩個 pattern：「後面接空白」與「就是行尾」。目前 gate 每一行都帶 pr= 等欄位，
+# 只寫接空白那個也會過；但那是把 hook 綁在 gate 現在的輸出格式上，gate 哪天改成只印
+# STATE 就會被誤擋。誤擋方向雖然安全（fail-closed），但那是**沉默的**壞掉——merge 停住
+# 而理由看起來像 gate 不通過。兩個 pattern 的成本是一行，不值得省。
+# 2026-08-06 Copilot 於 PR #16 指出。
+#
+# PASS_NO_CI 是 gate 確定 CI run 根本沒被建立時的降級狀態（不是「還在跑」——那仍是 WAIT_CI）。
+# 它放寬的只有「CI 必須驗過」這一項；unresolved 必須為 0、review 必須對到 current head 這些
+# 條件在 gate 那邊一項都沒鬆。接受它是三層明示的其中一層，另外兩層是 gate 自己回報
+# ci=ABSENT，以及 settings.json 的 hard_deny 也必須明寫接受。任何一層沒改就不會放行。
 OUT=$("$GATE" "$PR" 2>&1) || true
 case "$OUT" in
-  STATE=PASS*) exit 0 ;;
+  "STATE=PASS "*|"STATE=PASS")             exit 0 ;;
+  "STATE=PASS_NO_CI "*|"STATE=PASS_NO_CI") exit 0 ;;
   *) deny "[T0-9] merge gate 未通過，禁止 merge。pr-review-gate #$PR 回報：${OUT%%$'\n'*}" ;;
 esac

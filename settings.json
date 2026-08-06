@@ -369,7 +369,7 @@
     ],
     "hard_deny": [
       "$defaults",
-      "Never merge a pull request unless ~/.agents/bin/pr-review-gate reported STATE=PASS for that PR at the current head SHA in this session.",
+      "Never merge a pull request unless ~/.agents/bin/pr-review-gate reported STATE=PASS or STATE=PASS_NO_CI for that PR at the current head SHA in this session. PASS_NO_CI is the gate's degraded state, returned only when it confirmed no CI run was ever created for that commit — never when CI is merely pending, failing, or still queued. It is a deliberate narrow allowance, not a wildcard: every other STATE remains forbidden, including future states whose names begin with PASS.",
       "Never delete, transfer, or change the visibility of a GitHub repository, and never delete releases or tags.",
       "Never write to files under the user's home directory outside the session's working directory, ~/.claude, and ~/.agents — this includes ~/Documents, ~/Desktop, ~/Pictures, ~/Library, and shell startup files. Inside ~/.claude the contents of CLAUDE.md, settings.json, and hooks/ are separately protected by Edit deny rules and sandbox denyWrite; that protection covers editing those files and nothing else. It does not extend to git bookkeeping: staging, committing, or pushing those paths writes ~/.claude/.git (index, objects, refs), never the files themselves, and is ordinary version control of the user's own repository — allowed, including when a path argument names one of the protected files."
     ],
