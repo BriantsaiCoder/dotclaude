@@ -69,13 +69,42 @@ if [ "${1:-}" = "--selftest" ]; then
   run 'gh pr create 放行'        'gh pr create --fill'            FAIL_CI     0
   run 'gh pr view 放行'          'gh pr view 42'                  FAIL_CI     0
   run '無關指令放行'             'dotnet build -c Release'        FAIL_CI     0
+  # json_escape canary：reason 會夾帶 pr-review-gate 的原始輸出，那可能含雙引號或反斜線
+  # （GraphQL 錯誤訊息就常有）。只驗 exit code 會漏掉這種失敗——非法 JSON 一樣 exit 2，
+  # 但 host 解析不了 block 回覆，等於靜默失去這道防線。所以這項直接驗輸出可被 jq 解析。
+  {
+    printf '#!/bin/sh\n'
+    printf 'printf "%%s\\n" %s\n' "'STATE=FAIL_CI note=he said \"x\" path=C:\\tmp'"
+  } > "$d/gate"
+  chmod +x "$d/gate"
+  esc_out=$(jq -cn --arg cmd 'gh pr merge 42' --arg cwd "$d/repo" '{tool_input:{command:$cmd},cwd:$cwd}' |
+    PR_REVIEW_GATE="$d/gate" "$0" 2>&1 >/dev/null)
+  if printf '%s' "$esc_out" | jq -e '.decision == "block"' >/dev/null 2>&1; then
+    printf '  PASS  reason 含引號與反斜線時 deny 仍輸出合法 JSON\n'; p=$((p+1))
+  else
+    printf '  FAIL  reason 含引號時 deny 輸出非法 JSON：%s\n' "$esc_out"; f=$((f+1))
+  fi
   printf '總計：PASS=%s FAIL=%s\n' "$p" "$f"
   [ "$f" -eq 0 ]
   exit $?
 fi
 
+# JSON 字串轉義：純 bash 參數展開，不依賴 jq——deny() 必須在 jq 不可用時仍能輸出合法 JSON。
+# 與 guard-git-push.sh 同一份實作。reason 會帶 pr-review-gate 的原始輸出，那可能含雙引號或
+# 反斜線（GraphQL 錯誤訊息就常有），未轉義會產出非法 JSON，host 解析不了 block 回覆——那等於
+# 靜默失去這道防線，比誤擋嚴重得多。
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"   # 反斜線必須先轉，否則會把後面補的反斜線再轉一次
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}" # 控制字元在 JSON string 內非法
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '"%s"' "$s"
+}
+
 deny() {
-  printf '{"decision":"block","reason":"%s"}\n' "$1" >&2
+  printf '{"decision":"block","reason":%s}\n' "$(json_escape "$1")" >&2
   exit 2
 }
 

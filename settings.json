@@ -84,7 +84,8 @@
       "Bash(/usr/bin/env launchctl *)",
       "Bash(/usr/bin/env /bin/launchctl *)",
       "Bash(defaults write *)",
-      "Bash(sudo *)"
+      "Bash(sudo *)",
+      "Bash(rm -rf *)"
     ],
     "defaultMode": "auto",
     "disableBypassPermissionsMode": "disable",
@@ -314,10 +315,22 @@
     },
     "credentials": {
       "files": [
-        { "path": "~/.ssh", "mode": "deny" },
-        { "path": "~/.aws", "mode": "deny" },
-        { "path": "~/.gnupg", "mode": "deny" },
-        { "path": "~/.netrc", "mode": "deny" }
+        {
+          "path": "~/.ssh",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.aws",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.gnupg",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.netrc",
+          "mode": "deny"
+        }
       ]
     },
     "excludedCommands": [
