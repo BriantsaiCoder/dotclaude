@@ -21,12 +21,27 @@ if [ "${1:-}" = "--selftest" ]; then
   # 真實情境要撞到 FAIL_MERGE 或 UNAVAILABLE 很難，等撞上才發現對應寫錯就太晚了。
   d=$(mktemp -d "${TMPDIR:-/tmp}/guard-pr-merge.XXXXXX") || exit 1
   mkdir -p "$d/repo"
+  # payload MUST 用 jq 產生。printf 直接插值遇到引號或反斜線會產出無效 JSON，
+  # 於是被測腳本走的是「payload 解析失敗」分支而非真正的判定邏輯——引號規避那項會
+  # 因此變成假陽性（它 deny 了，但不是因為規避被識破）。jq 缺席時直接讓 selftest
+  # 失敗，不降級成不可信的比對。
+  if ! command -v jq >/dev/null 2>&1; then
+    printf 'selftest 需要 jq 產生合法 JSON payload（否則無法區分「規避被擋」與「payload 壞掉被擋」）\n' >&2
+    exit 1
+  fi
   p=0; f=0
   run() { # 1=desc 2=command 3=state 4=expect
-    if [ -n "$3" ]; then printf '#!/bin/sh\nprintf "STATE=%s pr=1 head=abc\\n"\n' "$3" > "$d/gate"
-    else printf '#!/bin/sh\nexit 1\n' > "$d/gate"; fi
+    # fake gate 只對 PR 42 回報指定的 STATE，其他編號一律 PASS。這讓「PR 編號抓錯」
+    # 表現為誤放行（exit 0），才會被 expect=2 的案例抓到；若不分編號一律回同一個
+    # STATE，抓錯編號的 bug 在 selftest 裡完全不可見。
+    if [ -n "$3" ]; then
+      # shellcheck disable=SC2016 # $1 要原樣寫進 fake gate 腳本，此處不得展開
+      printf '#!/bin/sh\nif [ "$1" = 42 ]; then printf "STATE=%s pr=42 head=abc\\n"; else printf "STATE=PASS pr=%%s head=abc\\n" "$1"; fi\n' "$3" > "$d/gate"
+    else
+      printf '#!/bin/sh\nexit 1\n' > "$d/gate"
+    fi
     chmod +x "$d/gate"
-    printf '{"tool_input":{"command":"%s"},"cwd":"%s"}' "$2" "$d/repo" |
+    jq -cn --arg cmd "$2" --arg cwd "$d/repo" '{tool_input:{command:$cmd},cwd:$cwd}' |
       PR_REVIEW_GATE="$d/gate" "$0" >/dev/null 2>&1
     g=$?
     if [ "$g" = "$4" ]; then printf '  PASS  %s\n' "$1"; p=$((p+1))
@@ -45,7 +60,12 @@ if [ "${1:-}" = "--selftest" ]; then
   run '帶 --repo 放行'           'gh pr merge --repo o/r 42'      PASS        0
   run '複合指令 PASS 放行'       'git status && gh pr merge 42'   PASS        0
   run '複合指令 FAIL 仍擋'       'git status && gh pr merge 42'   FAIL_CI     2
-  run '引號規避仍擋'             'gh \"pr\" merge'                PASS        2
+  # 前段的數字不得被當成 PR 編號。抓錯會拿到 99，fake gate 對 99 回 PASS → 誤放行 exit 0。
+  run '前段數字不搶 PR 編號'     'echo 99 && gh pr merge 42'      FAIL_CI     2
+  run '同段前置數字不搶編號'     'timeout 99 gh pr merge 42'      FAIL_CI     2
+  # merge 之後才取編號，選項與其值要跳過
+  run 'merge 後才取編號'         'gh pr merge --repo o/r 42'      FAIL_CI     2
+  run '引號規避仍擋'             'gh "pr" merge'                  PASS        2
   run 'gh pr create 放行'        'gh pr create --fill'            FAIL_CI     0
   run 'gh pr view 放行'          'gh pr view 42'                  FAIL_CI     0
   run '無關指令放行'             'dotnet build -c Release'        FAIL_CI     0
@@ -76,21 +96,39 @@ SCAN=${CMD//\"/}
 SCAN=${SCAN//\'/}
 SCAN=${SCAN//\\/}
 
-# 只認 gh ... pr ... merge 三個 token 同段出現。gh 可執行檔認裸 token 與完整路徑。
-case "$SCAN" in
-  *[Gg][Hh]*pr*merge*) ;;
-  *) exit 0 ;;
-esac
+# 複合命令切段（; | & 與 newline 皆為段界），只在含 gh…pr…merge 的那一段裡解析。
+# 對整串取「第一個純數字」會被前段搶走：`echo 99 && gh pr merge 42` 會拿 99 去查，
+# 而 99 若剛好是另一個已 PASS 的 PR，這個 gate 就放行了它根本沒驗過的目標 PR。
+# 2026-08-06 Copilot review 指出，實測確認。
+SEP=$'\034'
+CMD_SEGMENTS=${SCAN//[\;\|\&]/$SEP}
+CMD_SEGMENTS=${CMD_SEGMENTS//$'\n'/$SEP}
+segments=()
+IFS="$SEP" read -r -a segments <<< "$CMD_SEGMENTS"
 
-# 取 PR 編號：`gh pr merge 42`、`gh pr merge --repo x 42` 都能抓到第一個裸數字。
+merge_seg=""
+for seg in "${segments[@]}"; do
+  # gh 可執行檔認裸 token 與完整路徑；三個 token 必須同段出現才算執行意圖。
+  case "$seg" in *[Gg][Hh]*pr*merge*) merge_seg=$seg; break ;; esac
+done
+[ -n "$merge_seg" ] || exit 0
+
+# 編號只從 merge token 之後取。`timeout 99 gh pr merge 42` 的 99 在 merge 之前，
+# 不是 PR 編號；選項與其值（--repo owner/name）都不是裸數字，略過即可。
 PR=""
-for tok in $SCAN; do
+after_merge=0
+for tok in $merge_seg; do
+  if [ "$after_merge" -eq 0 ]; then
+    [ "$tok" = merge ] && after_merge=1
+    continue
+  fi
   case "$tok" in
+    -*)          ;;
     ''|*[!0-9]*) ;;
-    *) PR=$tok; break ;;
+    *)           PR=$tok; break ;;
   esac
 done
-[ -n "$PR" ] || deny "[T0-9] gh pr merge 未帶明確 PR 編號，無法驗證 merge gate。請寫成 'gh pr merge <號碼>'。"
+[ -n "$PR" ] || deny "[T0-9] 合併指令未帶明確 PR 編號，無法驗證 gate。請把編號寫在子指令之後。"
 
 GATE="${PR_REVIEW_GATE:-$HOME/.agents/bin/pr-review-gate}"
 [ -x "$GATE" ] || deny "[T0-9] 找不到可執行的 pr-review-gate（${GATE}），無法驗證 merge gate。"
