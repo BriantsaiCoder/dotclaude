@@ -68,8 +68,25 @@ if [ "${1:-}" = "--selftest" ]; then
   run '引號規避仍擋'             'gh "pr" merge'                  PASS        2
   # bash 解析後照樣執行，正規化前 *pr*merge* 卻看不到連續的 merge——fail-open
   run 'line-continuation 拆字仍擋' "$(printf 'gh pr mer\\\nge 42')" FAIL_CI    2
+  # 以下四項刻意用 STATE=PASS 的 gate：若 exit 仍是 2，就證明是 substitution 判定擋的，
+  # 而不是 gate 回報擋的——用 FAIL_CI 的 gate 兩者無法區分。
   # shellcheck disable=SC2016 # $( ) 是測試字面，不得展開
-  run '$ ( ) 遮蔽仍取得編號'     'gh pr merge $(echo 42)'         FAIL_CI     2
+  run '$( ) 拆字一律保守拒絕'    'gh pr m$(printf er)ge 42'       PASS        2
+  # shellcheck disable=SC2016
+  run '$( ) 於引數也保守拒絕'    'gh pr merge $(echo 42)'         PASS        2
+  # shellcheck disable=SC2016
+  run '反引號同樣保守拒絕'       'gh pr merge `echo 42`'          PASS        2
+  # shellcheck disable=SC2016
+  run '${ } 同樣保守拒絕'        'gh pr merge ${N}'               PASS        2
+  # 裸變數不含括號，列舉形狀的寫法會漏掉它——`gh pr $M 42`（M=merge）展開後照樣執行
+  # shellcheck disable=SC2016
+  run '裸 $VAR 取代子指令也擋'   'gh pr $M 42'                    PASS        2
+  # shellcheck disable=SC2016
+  run '裸 $VAR 當引數也擋'       'gh pr merge $N'                 PASS        2
+  # 刻意誤擋的記錄：唯讀的 gh pr view 帶 substitution 也會被擋。判不出是否為合併就保守，
+  # 正解是改寫成不含 substitution 的明確形式。
+  # shellcheck disable=SC2016
+  run '唯讀指令帶 subst 也擋(刻意)' 'gh pr view $(echo 42)'        PASS        2
   run 'gh pr create 放行'        'gh pr create --fill'            FAIL_CI     0
   run 'gh pr view 放行'          'gh pr view 42'                  FAIL_CI     0
   run '無關指令放行'             'dotnet build -c Release'        FAIL_CI     0
@@ -80,6 +97,13 @@ if [ "${1:-}" = "--selftest" ]; then
     printf '  FAIL  jq fallback 未偵測正規化後的意圖（fail-open）\n'; f=$((f+1))
   else
     printf '  PASS  jq fallback 用正規化結果比對\n'; p=$((p+1))
+  fi
+  # substitution 判定也必須在 fallback 生效，否則 jq 缺席時兩層防護同時失效。
+  # shellcheck disable=SC2016 # $( ) 是測試字面
+  if printf 'not-json gh pr m$(printf er)ge 42' | PR_REVIEW_GATE="$d/gate" "$0" >/dev/null 2>&1; then
+    printf '  FAIL  jq fallback 未擋 command substitution（fail-open）\n'; f=$((f+1))
+  else
+    printf '  PASS  jq fallback 對 substitution 保守拒絕\n'; p=$((p+1))
   fi
 
   # cwd canary：payload 的 .cwd 是 session 目錄，指令若寫成 `cd X && …`，實際執行
@@ -164,6 +188,23 @@ normalize() {
   printf '%s' "$s"
 }
 
+# command substitution 讓合併意圖無法用字串比對可靠判定：`m$(printf er)ge` 展開後就是
+# merge，但任何純字串正規化都看不出來——剝掉 $ ( ) 只會得到 `mprintf erge`。要真的判定
+# 必須執行它，而執行未知指令比誤擋危險得多。
+#
+# 因此帶 substitution 的 gh…pr 指令一律保守拒絕。這是刻意的誤擋，會連 `gh pr view $(…)`
+# 這種唯讀用法一起擋掉；正解與本檔開頭記載的相同——把指令改寫成不含 $( )、${ } 或反引號
+# 的明確形式。MUST NOT 為了消除這類誤擋而改成解析 shell 語法，那會開出規避路徑。
+has_subst() {
+  # 認任何 $ 與反引號，不只 $( ${ 兩種形狀：裸 `gh pr $M 42`（M=merge）同樣展開成合併
+  # 指令，而它不含括號。列舉形狀永遠會漏一種——這裡改成「只要有展開的可能就保守」。
+  # shellcheck disable=SC2016 # 要比對字面 $ 與反引號，不得展開
+  case "$1" in
+    *'$'*|*'`'*) return 0 ;;
+  esac
+  return 1
+}
+
 JQ="$(command -v jq 2>/dev/null || true)"
 INPUT="$(cat)"
 
@@ -175,11 +216,24 @@ if [ -z "$JQ" ] || ! CMD=$(printf '%s' "$INPUT" | "$JQ" -r '.tool_input.command 
   case "$SCAN_INPUT" in
     *"pr"*"merge"*) deny "[T0-9] jq 不可用或 payload 解析失敗，無法驗證 merge gate，保守拒絕。" ;;
   esac
+  # substitution 判定也必須在 fallback 生效，否則 jq 缺席時 `m$(printf er)ge` 直接通過——
+  # 那是兩層防護同時失效，正好落在最該保守的情境。
+  if has_subst "$INPUT"; then
+    case "$SCAN_INPUT" in
+      *[Gg][Hh]*pr*) deny "[T0-9] payload 無法解析且指令含 command substitution，無法判定是否為合併操作，保守拒絕。" ;;
+    esac
+  fi
   exit 0
 fi
 [ -z "$CMD" ] && exit 0
 
 SCAN=$(normalize "$CMD")
+
+if has_subst "$CMD"; then
+  case "$SCAN" in
+    *[Gg][Hh]*pr*) deny "[T0-9] 指令含 command substitution，無法可靠判定是否為合併操作，保守拒絕。請改寫成不含 \$( )、\${ } 或反引號的明確形式。" ;;
+  esac
+fi
 
 # 複合命令切段（; | & 與 newline 皆為段界），只在含 gh…pr…merge 的那一段裡解析。
 # 對整串取「第一個純數字」會被前段搶走：`echo 99 && gh pr merge 42` 會拿 99 去查，
