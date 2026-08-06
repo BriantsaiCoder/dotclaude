@@ -123,6 +123,17 @@ if [ "${1:-}" = "--selftest" ]; then
   else
     printf '  PASS  jq fallback 對 substitution 保守拒絕\n'; p=$((p+1))
   fi
+  # 上一項的 fixture 是空白分隔的，測不到真實 payload 的形狀：JSON 裡 gh 黏在 command:
+  # 後面，normalize 不動 : , { }，token 化切出 `{tool_input:{command:gh` 而不是 `gh`。
+  # 這項用真實 JSON 形狀（缺結尾大括號讓 jq 解析失敗），且 command 值經 normalize 後不含
+  # 字面 merge，所以只能靠 has_gh_pr 攔——正是 2026-08-06 實測 exit=0 的那條漏擋路徑。
+  # shellcheck disable=SC2016 # $( ) 是測試字面，不得展開
+  if printf '%s' '{"tool_input":{"command":"gh pr m$(printf er)ge 42"},"cwd":"/tmp"' |
+       PR_REVIEW_GATE="$d/gate" "$0" >/dev/null 2>&1; then
+    printf '  FAIL  jq fallback 未還原 JSON 的 token 邊界（fail-open）\n'; f=$((f+1))
+  else
+    printf '  PASS  jq fallback 還原 JSON token 邊界後仍保守拒絕\n'; p=$((p+1))
+  fi
 
   # cwd canary：payload 的 .cwd 是 session 目錄，指令若寫成 `cd X && …`，實際執行
   # 目錄是 X。取錯目錄時 pr-review-gate 查的是另一個 repo 的同號 PR——那不會報錯，
@@ -266,7 +277,15 @@ if [ -z "$JQ" ] || ! CMD=$(printf '%s' "$INPUT" | "$JQ" -r '.tool_input.command 
   esac
   # substitution 判定也必須在 fallback 生效，否則 jq 缺席時 `m$(printf er)ge` 直接通過——
   # 那是兩層防護同時失效，正好落在最該保守的情境。
-  if has_subst "$INPUT" && has_gh_pr "$SCAN_INPUT"; then
+  # 這裡的 SCAN_INPUT 是**整段 JSON**，不是單獨的 command 字串。normalize 不動 : , { }，
+  # 所以 `"command":"gh pr ..."` 到這裡是 `command:gh pr ...`——gh 黏在 command: 後面，
+  # token 化切出來的是 `{tool_input:{command:gh`，既不等於 gh 也不匹配 */gh，帶
+  # substitution 的合併指令會被漏擋。那是 fail-open，而且正好落在最該保守的路徑。
+  # 2026-08-06 Copilot 於 PR #15 指出，實測 exit=0 確認。
+  #
+  # 把 JSON 結構字元換成空白還原 token 邊界。`/` 刻意不換：換掉的話
+  # /opt/homebrew/bin/gh 會被拆成好幾段，*/gh 這條完整路徑比對就失效了。
+  if has_subst "$INPUT" && has_gh_pr "${SCAN_INPUT//[\{\}\[\]:,]/ }"; then
     deny "[T0-9] payload 無法解析且指令含 command substitution，無法判定是否為合併操作，保守拒絕。"
   fi
   exit 0
