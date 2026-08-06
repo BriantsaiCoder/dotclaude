@@ -87,6 +87,11 @@ if [ "${1:-}" = "--selftest" ]; then
   # 正解是改寫成不含 substitution 的明確形式。
   # shellcheck disable=SC2016
   run '唯讀指令帶 subst 也擋(刻意)' 'gh pr view $(echo 42)'        PASS        2
+  # normalize 剝掉引號後含空白的路徑會被切成多段，只取第一段等於用錯目錄；
+  # 錯的目錄可能有同號且 PASS 的 PR——誤放行。無法解析成單一 token 必須拒絕。
+  run 'cd 目標含空白時拒絕'      'cd /a b/c && gh pr merge 42'    PASS        2
+  run 'cd 帶選項時拒絕'          'cd -P /tmp && gh pr merge 42'   PASS        2
+  run 'cd 無引數時拒絕'          'cd && gh pr merge 42'           PASS        2
   run 'gh pr create 放行'        'gh pr create --fill'            FAIL_CI     0
   run 'gh pr view 放行'          'gh pr view 42'                  FAIL_CI     0
   run '無關指令放行'             'dotnet build -c Release'        FAIL_CI     0
@@ -287,7 +292,13 @@ for seg in "${segments[@]}"; do
   [ "$seg" = "$merge_seg" ] && break
   seg_toks=()
   read -r -a seg_toks <<< "$seg"
-  if [ "${seg_toks[0]:-}" = cd ] && [ -n "${seg_toks[1]:-}" ]; then
+  if [ "${seg_toks[0]:-}" = cd ]; then
+    # normalize 已剝掉引號與反斜線，所以 `cd "/a b/c"` 到這裡是 `cd /a b/c`，
+    # tokenization 會切成三段而取到 `/a`——用錯目錄，而錯的目錄可能有同號且
+    # STATE=PASS 的 PR，那是誤放行。同理 `cd -P /x` 也不是單一路徑。
+    # 只接受 `cd <單一 token>` 這一種能確定語意的形狀，其餘一律拒絕。
+    [ "${#seg_toks[@]}" -eq 2 ] ||
+      deny "[T0-9] cd 的目標無法安全解析成單一路徑（含空白、跳脫或額外引數），pr-review-gate 會查到錯的 repo，保守拒絕。"
     CWD=${seg_toks[1]}
   fi
 done
