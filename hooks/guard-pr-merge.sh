@@ -93,13 +93,13 @@ done
 [ -n "$PR" ] || deny "[T0-9] gh pr merge 未帶明確 PR 編號，無法驗證 merge gate。請寫成 'gh pr merge <號碼>'。"
 
 GATE="${PR_REVIEW_GATE:-$HOME/.agents/bin/pr-review-gate}"
-[ -x "$GATE" ] || deny "[T0-9] 找不到可執行的 pr-review-gate（$GATE），無法驗證 merge gate。"
+[ -x "$GATE" ] || deny "[T0-9] 找不到可執行的 pr-review-gate（${GATE}），無法驗證 merge gate。"
 
 # pr-review-gate 用 cwd 解析 repo，所以必須切到 PostToolUse payload 帶的 cwd，
 # 否則會查到別的 repo 的同號 PR（該工具註解裡記錄過這個實測坑）。
 CWD=$(printf '%s' "$INPUT" | "$JQ" -r '.cwd // empty' 2>/dev/null)
 if [ -n "$CWD" ] && [ -d "$CWD" ]; then
-  cd "$CWD" || deny "[T0-9] 無法切換到 payload 指定的 cwd（$CWD），pr-review-gate 會查到錯的 repo，保守拒絕。"
+  cd "$CWD" || deny "[T0-9] 無法切換到 payload 指定的 cwd（${CWD}），pr-review-gate 會查到錯的 repo，保守拒絕。"
 fi
 
 OUT=$("$GATE" "$PR" 2>&1) || true
