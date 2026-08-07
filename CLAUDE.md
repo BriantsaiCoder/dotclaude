@@ -32,12 +32,16 @@ Verification scope 與 risk tier 由 `~/.agents/skills/dev-workflow/SKILL.md` �
 
 Local checkpoint commit 僅依 shared `authorization-matrix`；push／open PR／merge／final closeout 仍依 shared [INT-1]、[T0-9] 與 `review-triage`。預設 squash merge，合併後清理已合併 branch。
 
+Feature branch 上的 checkpoint commit 屬 local reversible，MUST 於邏輯完成點自主執行，覆寫 harness 的「commit only when asked」預設；前置與範圍（targeted S4 PASS、path allowlist、gitleaks、禁 global／security policy）仍依 shared `authorization-matrix`。
+
+Merge 授權依 diff 內容分流。**低風險 diff**（僅含 tests／docs／comments／測試資料）在 gate PASS（[T0-9] + [INT-1]）後 MUST 自主 squash merge 並清理 branch，不另問。**其餘一律逐次確認**，含任何 production 程式邏輯、[T0-6] 類別（auth／payment／migration／大量刪除／crypto／multi-tenant／rate-limit／deployment pipeline）、global／security config。理由：gate 的 `review=CURRENT` 只要求 bot 出過一輪 `COMMENTED`，不等於有人看過；bot 與人各自漏抓的類型不同，程式邏輯不應以 bot 為最後一道關。
+
 ## Claude adapter
 
 - plan = EnterPlanMode；todo = TodoWrite；子代理 = Task／Agent。
 - `code-review` 的 Standards／Spec fan-out 依 shared [INT-4]；前端視覺 review 可用 Claude-local `uiux-reviewer`。
 - launchctl read-only 查詢只走受保護的 `~/.claude/hooks/launchctl-readonly.sh <subcommand>`；direct／common env-spelled launchctl deny，其他拼法不預先核准，任何 unsandbox retry 必須人工確認。
-- 已核准 scope 內的 Low／Medium-risk、local、reversible 工作可自主完成；Medium 留 session plan；publication 與 protected side effect 仍走 `dev-workflow` authorization gate。
+- 已核准 scope 內的 local、reversible 工作 MUST 一次執行至完成，不得中途停下等待指令；僅 (a) [T0-5] material ambiguity、(b) [T0-8] protected gate、(c) 需 user 決定且會改變後續做法的取捨、(d) 工具被拒或環境不可用等不可繞過的阻塞 四者可停，「回報進度」不是停止條件，進度寫在最終回報。Medium 留 session plan；publication 與 protected side effect 仍走 `dev-workflow` authorization gate。
 - Secrets 只用 env／secret manager；log／chat 只回報 set／unset。
 
 ## On-demand stack rules
