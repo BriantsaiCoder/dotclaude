@@ -753,12 +753,12 @@ else
 fi
 
 if rg -Fq '已核准 scope 內的 local、reversible 工作 MUST 一次執行至完成' CLAUDE.md &&
-   rg -Fq '「回報進度」不是停止條件' CLAUDE.md &&
-   rg -Fq '(d) 工具被拒或環境不可用等不可繞過的阻塞' CLAUDE.md &&
+   rg -Fq '中斷條件依 shared [INT-8]' CLAUDE.md &&
+   rg -Fq '工具被拒／環境不可用' CLAUDE.md &&
    rg -Fq 'publication 與 protected side effect 仍走 `dev-workflow` authorization gate' CLAUDE.md &&
    grep -Fqx -- '- Delegation：依 shared `dev-workflow` [INT-4] 由 AI 自主判定，無須另問。' CLAUDE.md &&
    ! rg -q '幾個 tool call 可完成的工作不派 subagent|單一小任務不拆多個 subagent|S5 以外不另派 subagent' CLAUDE.md; then
-  ok "Opus 5 autonomy 為祈使句且明列停止條件；publication gate 保留；delegation 僅由 shared INT-4 routing"
+  ok "Opus 5 autonomy 為祈使句；中斷條件轉介 shared INT-8 且保留工具／環境阻塞；publication gate 保留；delegation 僅由 shared INT-4 routing"
 else
   bad "Opus 5 risk-based autonomy 或 shared delegation routing 漂移"
 fi
