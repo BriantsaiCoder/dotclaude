@@ -41,7 +41,7 @@ Merge 授權依 diff 內容分流。**低風險 diff**（僅含 tests／docs／c
 - plan = EnterPlanMode；todo = TodoWrite；子代理 = Task／Agent。
 - `code-review` 的 Standards／Spec fan-out 依 shared [INT-4]；前端視覺 review 可用 Claude-local `uiux-reviewer`。
 - launchctl read-only 查詢只走受保護的 `~/.claude/hooks/launchctl-readonly.sh <subcommand>`；direct／common env-spelled launchctl deny，其他拼法不預先核准，任何 unsandbox retry 必須人工確認。
-- 已核准 scope 內的 local、reversible 工作 MUST 一次執行至完成，不得中途停下等待指令；僅 (a) [T0-5] material ambiguity、(b) [T0-8] protected gate、(c) 需 user 決定且會改變後續做法的取捨、(d) 工具被拒或環境不可用等不可繞過的阻塞 四者可停，「回報進度」不是停止條件，進度寫在最終回報。Medium 留 session plan；publication 與 protected side effect 仍走 `dev-workflow` authorization gate。
+- 已核准 scope 內的 local、reversible 工作 MUST 一次執行至完成，中斷條件依 shared [INT-8]（另含工具被拒／環境不可用）；Medium 留 session plan；publication 與 protected side effect 仍走 `dev-workflow` authorization gate。
 - Secrets 只用 env／secret manager；log／chat 只回報 set／unset。
 
 ## On-demand stack rules
