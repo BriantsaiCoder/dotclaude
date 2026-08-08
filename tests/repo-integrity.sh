@@ -613,10 +613,16 @@ _push_probe deny  'git push --mirror origin'
 #
 # 只掃非註解行：本 repo 的守衛註解本身會提到這些字元，掃進去會恆紅。
 #
-# pattern 不對 delimiter 的字元集合做假設：只要求 `<<` 後第一個非空白字元不是 `=`
-# （那是左移賦值 `<<=`）。第一版寫成 `.?[A-Za-z_]`，漏掉 delimiter 以數字開頭的
-# `<<1` 與 `<<'1'`——那是可繞過的守衛（2026-08-08 agents-config #71 review 指出並
-# 實測確認）。代價是算術左移會誤報；守備的是安全閘，噪音比靜默漏放便宜。
+# pattern 不對 delimiter 的字元集合做任何假設。第一版寫成 `.?[A-Za-z_]`，漏掉
+# delimiter 以數字開頭的 `<<1` 與 `<<'1'`；第二版改成 `[^=[:space:]]`，又漏掉
+# `<<=EOF` 與 `<< =`（兩者都是合法 here-doc）。兩次都是可繞過的守衛
+# （2026-08-08 agents-config #71／dotclaude #23 review 指出並實測確認）。
+# 不排除任何 delimiter 字元，連 `=` 也不排除。第一版寫成 `[^=[:space:]]`，理由是避開
+# 算術左移 `$((a <<= 2))` 的誤報——那是錯的：shell 沒有 `<<=` 這個 redirect 運算子，
+# `cmd <<=EOF` 是 delimiter 為 `=EOF` 的**合法 here-doc**（實測 `read -r -a arr <<=EOF`
+# 確實填滿陣列），`cmd << =` 同理。為了少一個誤報而在安全斷言上開一個可用的繞過口，
+# 方向剛好相反。誤報是噪音，繞過是靜默失去防線。
+# 代價是算術左移會誤報；守備的是安全閘。
 _no_tempfile_redirect() { # $1=守衛檔
   local hits
   # 檔名前的 `--` 不可省：路徑以 `-` 開頭時 grep 會當成 option，輸出自己的說明而非
@@ -632,7 +638,7 @@ _no_tempfile_redirect() { # $1=守衛檔
     bad "靜態掃描讀不到守衛內容（grep rc=${rc}）: $1"
     return
   fi
-  hits="$(printf '%s\n' "$src" | grep -E '<<-?[[:space:]]*[^=[:space:]]')" || hits_rc=$?
+  hits="$(printf '%s\n' "$src" | grep -E '<<-?[[:space:]]*[^[:space:]]')" || hits_rc=$?
   if [ "$hits_rc" -ge 2 ]; then
     bad "靜態掃描自身失敗（grep rc=${hits_rc}）: $1"
   elif [ -z "$hits" ]; then
