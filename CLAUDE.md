@@ -30,7 +30,7 @@ Verification scope 與 risk tier 由 `~/.agents/skills/dev-workflow/SKILL.md` �
 
 ### S5 REVIEW
 
-中高風險或進 PR 的變更 MUST 跑 Standards 與 Spec 兩軸（[S5-1]～[S5-4] 在 kernel）；缺 reviewer capability 附 UNAVAILABLE probe，不得以自審頂替。
+中高風險或進 PR 的變更 MUST 跑 Standards 與 Spec 兩軸；條文 [S5-1]～[S5-4] 與 `UNAVAILABLE`（附 probe）的定義同在 `~/.agents/skills/dev-workflow/SKILL.md`。缺 reviewer capability 標 UNAVAILABLE，不得以自審頂替。
 
 ### S6 CLOSEOUT
 
