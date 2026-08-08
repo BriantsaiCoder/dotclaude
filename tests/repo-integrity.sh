@@ -1004,6 +1004,90 @@ else
   fi
 fi
 
+# ── 直接 exec 的 hook 必須保有 exec bit ──────────────────────────────────────────
+#
+# 2026-08-08：上面那道指紋守衛比對的是 `shasum` 的**內容**，看不到 file mode。這是它自稱
+# 涵蓋「內容變更與檔案集合變更」之外的第三個維度，而且是有實害的那一個：
+#   * 註冊時帶 `bash ` 前綴的 hook 不讀 exec bit，翻成 644 無害。
+#   * 沒帶前綴的是直接 exec。翻成 644 就 exec 失敗，而 audit-bash.sh 註冊為 async——
+#     失敗**完全靜默**：Bash audit trail 停止、指紋零差異、測試零差異、使用者零訊號。
+#   * launchctl-readonly.sh 不是 hook 而是 permissions.allow 直接 exec 的路徑，是
+#     CLAUDE.md 指定的唯一 launchctl 查詢管道，同一個曝險面。
+#
+# 從 settings.json 的註冊處推導而非硬編清單：將來任何未加 `bash ` 前綴註冊的 hook 自動
+# 被涵蓋，不必記得回來加名字。比對走 repo 相對路徑（hooks/<basename>）而不是註冊字串裡的
+# ~/.claude/…，因為 CI 的 checkout 不在 $HOME/.claude；git 有保存 100755 所以 CI 驗得到。
+# 篩選只用一條「路徑前綴」規則，不用副檔名白名單、也不列舉 interpreter：
+#   * 副檔名白名單（*.sh|*.py）會靜默漏掉 extensionless、.mjs 等註冊形狀，而本區塊自稱
+#     「將來任何未加 bash 前綴註冊的 hook 自動被涵蓋」——白名單直接違背那句話。
+#   * 列舉 interpreter（bash /sh /...）永遠列不完（env bash、zsh、python3），而且不必列：
+#     帶前綴的指令第一個 token 是 interpreter，本來就不以 ~/.claude/hooks/ 開頭。
+#   * 只認 ~/.claude/hooks/ 之下的路徑，順帶擋掉 basename 對撞——否則註冊
+#     /opt/tools/audit-bash.sh 會被拿去驗 hooks/audit-bash.sh 的 exec bit 而假 PASS。
+# 已知邊界（不宣稱涵蓋）：
+#   * 註冊在 hooks/ 之外的直接 exec 腳本（例如 ~/.claude/scripts/、${CLAUDE_PLUGIN_ROOT}/…）
+#     不在此斷言範圍內，本區塊只負責本 repo 的 hooks/。
+#   * **部分** schema 漂移：若將來多出一種註冊形狀（plugin hooks、.hooks[][].hooks[] 旁邊
+#     再多一個 key），舊形狀仍解析得出、_execbit_reg > 0，新形狀則完全隱形而報綠。
+#     下面的 reg==0 只擋得住**全量**漂移。拿同一份 schema 去交叉驗證是循環論證，沒有便宜解。
+# 為什麼不把 mode 併進 tests/hooks.sha256 而是另開一道：git 只保存 x bit（100644/100755），
+# 從 working tree 算出的完整 mode manifest 在本機與 CI 之間不可重現——本 repo 現成三個反例
+# （drift-check.sh 本機 700／git 755，patch-chrome-devtools-mcp.sh 與 patch-playwright-mcp.sh
+# 本機 600／git 644）。只驗 x bit 正好是 git 保證得了的粒度，兩個正交性質分兩道守衛。
+# jq 那側對 allow 只做**形狀**篩選（`^Bash\([~/$]`，即「看起來像路徑」），不做 .claude/hooks/
+# 的前綴判定——路徑判定只留在下面的 shell case 一個地方。原本 jq 寫成
+# `^Bash\((~|\$HOME)/\.claude/hooks/`，比 case 窄：絕對路徑寫法 `Bash(/Users/…/hooks/x.sh *)`
+# 被 jq 靜默排除，case 明明收得到卻永遠拿不到它，於是 n 悄悄少一支而仍報 ok。兩個地方各自
+# 判定同一件事就會漂移成這樣（PR #26 Copilot review 實測：絕對路徑 allow 配 644 報 ok、
+# n 由 3 掉到 2）。形狀篩選也不會膨脹 _execbit_reg：現行 allow 只有 launchctl-readonly.sh
+# 這一條以 ~ / / / $ 開頭，其餘（Bash(git status:*)、Bash(jq *)…）都不符合。
+# allow 規則的尾綴用 sub 而非 rtrimstr：rtrimstr 只吃精確後綴，而 `Bash(cmd:*)` 是本檔
+# 現行慣例（Bash(git status:*)、Bash(git add:*)、Bash(git commit:*)），`Bash(cmd)` 也是
+# 合法的無參數寫法——兩者用 rtrimstr(" *)") 都會殘留字元而被靜默丟掉，丟掉的正好是
+# launchctl-readonly.sh，CLAUDE.md 指定的唯一 launchctl 管道。2026-08-08 S5 兩軸實測。
+_execbit_missing=""
+_execbit_absent=""
+_execbit_n=0
+_execbit_reg=0
+while IFS= read -r _cmd; do
+  [ -n "$_cmd" ] || continue
+  _execbit_reg=$((_execbit_reg + 1))
+  # 三種拼法都要收：`~/…`、展開後的絕對路徑、以及**字面** `$HOME/…`。第三個用單引號
+  # 防展開——雙引號的 "$HOME/.claude/hooks/"* 在比對前就變成絕對路徑，永遠對不到字面
+  # `$HOME/...` 的註冊。而 jq 那側是放行它的，於是該註冊會計入 _execbit_reg、卻被這裡
+  # 丟掉，湊出 reg>0 且 n==0 → 報「曝險面為零」而實際有未受檢的直接 exec 註冊。
+  # 2026-08-08 apply pass 實測到這個反向誤綠；它與本區塊自稱修掉的是同一形狀。
+  case "$_cmd" in
+    "~/.claude/hooks/"*|"$HOME/.claude/hooks/"*|'$HOME/.claude/hooks/'*) ;;
+    *) continue ;;
+  esac
+  _base="${_cmd%% *}"; _base="${_base##*/}"
+  _execbit_n=$((_execbit_n + 1))
+  if [ ! -f "hooks/$_base" ]; then
+    _execbit_absent="$_execbit_absent hooks/$_base"
+  elif [ ! -x "hooks/$_base" ]; then
+    _execbit_missing="$_execbit_missing hooks/$_base"
+  fi
+done < <(jq -r '
+  [ (.hooks // {} | to_entries[].value[]?.hooks[]?.command),
+    (.permissions.allow[]? | select(test("^Bash\\([~/$]"))
+                           | ltrimstr("Bash(") | sub("[ :*)]+$";"")) ]
+  | .[] | select(. != null and . != "")' settings.json 2>/dev/null)
+# 三個狀態要分開，不能合成一個 n==0：
+#   * 讀不到任何註冊 → settings.json 壞了或 schema 漂移，bad。
+#   * 有註冊但沒有直接 exec 的 → 全部改成 bash 前綴了，那是**強化**（曝險面歸零），
+#     必須 ok。合成 n==0 會讓最理想的修法報紅，與本檔「新增不會紅、刪除才會」相牴觸，
+#     也正是 PR #25 apply pass 對 `== 1` 的同一條批評。
+if [ "$_execbit_reg" -eq 0 ]; then
+  bad "讀不到任何 hook 註冊（settings.json 不可解析、jq 缺席、或註冊 schema 已變）——這道斷言失去依據，不是通過"
+elif [ "$_execbit_n" -eq 0 ]; then
+  ok "settings.json 沒有直接 exec 的 hook 註冊（共 $_execbit_reg 筆皆帶 interpreter 前綴）——exec bit 曝險面為零"
+elif [ -n "$_execbit_absent" ] || [ -n "$_execbit_missing" ]; then
+  bad "直接 exec 的 hook 有問題（一次列全）：檔案不存在[${_execbit_absent# }] 缺 exec bit[${_execbit_missing# }]（chmod +x 修復）"
+else
+  ok "直接 exec 註冊的 $_execbit_n 支 hook 皆保有 exec bit（清單推導自 settings.json 註冊處）"
+fi
+
 # ~/.claude/.claude/ 對 cwd=~/.claude 的 session 是完整的 settings source（可註冊
 # PreToolUse hook、可加 permissions.allow），而 .gitignore 第 2 行的 `*` 讓 git 與 CI
 # 完全看不見它。這比 hooks/*.sh 威力更大——settings 可以裝 hook。

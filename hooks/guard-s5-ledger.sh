@@ -40,8 +40,35 @@ if [ "${1:-}" = "--selftest" ]; then
     exit 1
   fi
   self="${BASH_SOURCE[0]:-$0}"
-  tmpdir="$(mktemp -d)"
+  # mktemp 失敗必須讓 selftest 立刻死，理由與上面的 jq 守護同一條，只是換一個依賴：
+  # 本檔刻意不用 -e（見開頭），所以 `tmpdir="$(mktemp -d)"` 失敗會被吞掉、$tmpdir 變空字串，
+  # 於是每個 fixture 路徑塌成 `/good.md`、`/splitaxis.md`——寫不進去，被測腳本一律走
+  # 「body-file 不可讀」那條分支。結果是 allow 案例假 FAIL，而**整個 deny 半邊假 PASS**：
+  # 它確實 deny 了，但不是因為規避被識破。2026-08-08 在 Bash sandbox 下實測到這個形態
+  # （mkdtemp on /var/folders/… Operation not permitted）。裸 mktemp -d 也是主因之一，
+  # 比照 guard-pr-merge.sh 改用 $TMPDIR 模板。
+  tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/guard-s5-ledger.XXXXXX")" || {
+    printf 'selftest 需要可寫的暫存目錄（否則 deny 案例會因 fixture 不存在而假 PASS）\n' >&2
+    exit 1
+  }
   trap 'rm -rf "$tmpdir"' EXIT
+  # mktemp 成功不等於 fixture 寫得進去（唯讀掛載、配額滿、目錄權限被改都會讓 mkdir 過而
+  # 寫入失敗）。而 run_case 只看 rc、不看 stderr、也不驗 fixture 存在，所以任何一條讓
+  # fixture 寫不出來的路徑，都會讓**整個 deny 半邊因「body-file 不可讀」而假 PASS**——
+  # 與 mktemp 失敗時完全同一個形狀。守 mktemp 只擋掉觀察到的那一條，canary 擋的是
+  # **tmpdir 層級**那一類（唯讀掛載、配額滿、目錄權限被改）。
+  # 不擋的仍有：fixture 逐案寫入失敗、寫出但內容為空、測試自身把路徑寫錯——根因是
+  # run_case 丟掉 stderr、只斷言 rc，不驗 deny 的**理由**。真正的結構解是讓 run_case
+  # 斷言 deny reason 屬於「缺兩軸狀態」而非「body-file 不可讀」（兩者訊息已可區分），
+  # 比照 tests/repo-integrity.sh 的 _push_probe。列為 follow-up，不在本次範圍。
+  # printf 不加 2>/dev/null：redirection 由左至右處理，`> file` 先失敗，抑制根本蓋不到
+  # permission denied 那條；它真正會吃掉的是配額滿時的 `printf: write error`——也就是
+  # 唯一說明原因的那行，而 repo-integrity.sh 會把 selftest 的 stderr 一起收進失敗輸出。
+  printf 'canary\n' > "$tmpdir/.canary"
+  if [ ! -s "$tmpdir/.canary" ]; then
+    printf 'selftest 無法在暫存目錄寫入 fixture（deny 案例會因檔案不存在而假 PASS）：%s\n' "$tmpdir" >&2
+    exit 1
+  fi
   fails=0
 
   run_case() {
