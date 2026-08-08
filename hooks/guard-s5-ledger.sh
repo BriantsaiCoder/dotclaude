@@ -99,6 +99,13 @@ ate --title t --body "nothing"'
   boundary_body="$tmpdir/boundary.md"
   printf 'S5 Standards: PASS\nS5 Spec: UNAVAILABLE' > "$boundary_body"
   run_case allow '最後一行無換行，狀態值靠字串結尾收邊'        "gh pr create --title t --body-file $boundary_body"
+  # 狀態值必須與軸名同一行：[[:space:]] 會吃掉換行，讓下面兩種跨行寫法都算合法。
+  crossline_body="$tmpdir/crossline.md"
+  printf 'S5 Standards:\nPASS\nS5 Spec:\nPASS\n' > "$crossline_body"
+  run_case deny  '狀態值跨行（軸名與值不同行）'                "gh pr create --title t --body-file $crossline_body"
+  splitaxis_body="$tmpdir/splitaxis.md"
+  printf 'S5\nStandards: PASS\nS5\nSpec: PASS\n' > "$splitaxis_body"
+  run_case deny  '軸名本身被換行切開'                          "gh pr create --title t --body-file $splitaxis_body"
 
   printf '\n'
   if [ "$fails" -eq 0 ]; then
@@ -219,9 +226,12 @@ fi
 # 邊界是「非字母數字底線」而不只是空白——`SKIPPED（無 spec 檔）` 是本檔 deny 訊息自己給
 # 的範例，全形括號必須算邊界。BODY 是多行字串而 bash 的 =~ 沒有 multiline，所以 `$` 只
 # 匹配整份字串的結尾；行尾的換行由前半接住。
+# 用 [[:blank:]]（空白與 tab）而非 [[:space:]]（含換行）：後者讓 `S5 Standards:\nPASS`
+# 與 `S5\nStandards:` 都算合法，與本檔到處在講的「狀態**行**」不一致。狀態值必須跟軸名
+# 在同一行。
 missing=""
-[[ "$BODY" =~ S5[[:space:]]Standards:[[:space:]]*$STATUS_RE([^A-Za-z0-9_]|$) ]] || missing="S5 Standards"
-[[ "$BODY" =~ S5[[:space:]]Spec:[[:space:]]*$STATUS_RE([^A-Za-z0-9_]|$) ]] ||
+[[ "$BODY" =~ S5[[:blank:]]+Standards:[[:blank:]]*$STATUS_RE([^A-Za-z0-9_]|$) ]] || missing="S5 Standards"
+[[ "$BODY" =~ S5[[:blank:]]+Spec:[[:blank:]]*$STATUS_RE([^A-Za-z0-9_]|$) ]] ||
   missing="${missing:+$missing 與 }S5 Spec"
 
 [ -z "$missing" ] && exit 0

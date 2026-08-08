@@ -918,12 +918,25 @@ fi
 # （selftest 有沒有過、anchor 在不在、bash -n），「在既有 hook 尾端附加一行」全部照過。
 # 而 hook 在沙箱外執行，附加的那一行拿得到完整 user 權限。
 # 釘內容雜湊讓「改 hook」變成明示動作——改完必須同步更新這個檔，忘了就紅。
+#
+# 比對「整份重算的指紋」而不是跑 `shasum -c`：後者只驗清單裡列到的檔案，**新增**一支
+# hook 而不更新清單完全不會被發現——而新增的 hook 一樣會被執行，那正是這道守衛要擋的
+# 事。等值比對同時抓內容變更與檔案集合變更（新增／刪除／改名）。
 if [ ! -f tests/hooks.sha256 ]; then
   bad "tests/hooks.sha256 不存在——hooks/** 已無 Edit deny，內容指紋是唯一的偵測面"
-elif (cd hooks && shasum -a 256 -c ../tests/hooks.sha256 >/dev/null 2>&1); then
-  ok "hooks 內容指紋與 tests/hooks.sha256 一致"
 else
-  bad "hooks 內容與 tests/hooks.sha256 不符。改 hook 後請同步更新：cd hooks && shasum -a 256 *.sh *.py | sort -k2 > ../tests/hooks.sha256"
+  _hooks_now="$(cd hooks && shasum -a 256 -- *.sh *.py 2>/dev/null | sort -k2)"
+  _hooks_pinned="$(cat tests/hooks.sha256)"
+  if [ -z "$_hooks_now" ]; then
+    bad "hooks/ 下掃不到任何 .sh／.py——指紋比對失去依據"
+  elif [ "$_hooks_now" = "$_hooks_pinned" ]; then
+    ok "hooks 內容與檔案集合皆與 tests/hooks.sha256 一致"
+  else
+    printf '%s\n' "$_hooks_now" > "${TMPDIR:-/tmp}/hooks-now.$$" 2>/dev/null &&
+      diff "${TMPDIR:-/tmp}/hooks-now.$$" tests/hooks.sha256 2>/dev/null | head -6
+    rm -f "${TMPDIR:-/tmp}/hooks-now.$$" 2>/dev/null
+    bad "hooks 內容或檔案集合與 tests/hooks.sha256 不符（上列為差異）。改動後請同步更新：cd hooks && shasum -a 256 -- *.sh *.py | sort -k2 > ../tests/hooks.sha256"
+  fi
 fi
 
 # ~/.claude/.claude/ 對 cwd=~/.claude 的 session 是完整的 settings source（可註冊
