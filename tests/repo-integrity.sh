@@ -612,9 +612,14 @@ _push_probe deny  'git push --mirror origin'
 # 靜態斷言則到哪都成立：只要切詞路徑重新出現 here-doc／here-string 就紅。
 #
 # 只掃非註解行：本 repo 的守衛註解本身會提到這些字元，掃進去會恆紅。
+#
+# pattern 不對 delimiter 的字元集合做假設：只要求 `<<` 後第一個非空白字元不是 `=`
+# （那是左移賦值 `<<=`）。第一版寫成 `.?[A-Za-z_]`，漏掉 delimiter 以數字開頭的
+# `<<1` 與 `<<'1'`——那是可繞過的守衛（2026-08-08 agents-config #71 review 指出並
+# 實測確認）。代價是算術左移會誤報；守備的是安全閘，噪音比靜默漏放便宜。
 _no_tempfile_redirect() { # $1=守衛檔
   local hits
-  hits=$(grep -vE '^[[:space:]]*#' "$1" | grep -E '<<<|<<-?[[:space:]]*.?[A-Za-z_]') || hits=""
+  hits=$(grep -vE '^[[:space:]]*#' "$1" | grep -E '<<-?[[:space:]]*[^=[:space:]]') || hits=""
   if [ -z "$hits" ]; then
     ok "守衛不依賴暫存檔 redirect: $1"
   else
@@ -643,8 +648,10 @@ fi
 # 行為案例只在條件真的成立時才跑：/tmp 可寫就重現不了，標 SKIP 而不是給一個
 # 沒有意義的綠。sandbox 內 /tmp 被擋，這兩條才有鑑別力。
 if [ -n "$push_probe_dir" ]; then
-  if ( : > /tmp/.repo-integrity-tmpwrite ) 2>/dev/null; then
-    rm -f /tmp/.repo-integrity-tmpwrite
+  # 用 mktemp 而非固定檔名：固定名有 symlink／hardlink 風險，root 執行時可能誤覆寫
+  # 任意檔案。帶目錄的 template 而非 `mktemp -p`——後者語意在 BSD 與 GNU 之間有過差異。
+  if _tmp_probe="$(mktemp /tmp/repo-integrity-tmpwrite.XXXXXX 2>/dev/null)"; then
+    rm -f "$_tmp_probe"
     printf '  SKIP  唯讀 cwd 行為案例：/tmp 可寫，此環境重現不了 here-doc fallback\n'
   else
     _ro_cwd="$push_probe_dir/readonly-cwd"
