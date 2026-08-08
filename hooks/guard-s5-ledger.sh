@@ -92,6 +92,13 @@ if [ "${1:-}" = "--selftest" ]; then
   run_case deny  'command substitution 保守拒絕'              'gh pr create --title t --body-file $(mktemp)'
   run_case deny  '規避: pr cre\<newline>ate'                  'gh pr cre\
 ate --title t --body "nothing"'
+  # 狀態值的前綴不算數：沒有邊界條件時 PASSING／FAILSAFE 會命中 PASS／FAIL 而放行。
+  prefix_body="$tmpdir/prefix.md"
+  printf 'S5 Standards: PASSING\nS5 Spec: FAILSAFE\n' > "$prefix_body"
+  run_case deny  '狀態值只是合法值的前綴（PASSING／FAILSAFE）' "gh pr create --title t --body-file $prefix_body"
+  boundary_body="$tmpdir/boundary.md"
+  printf 'S5 Standards: PASS\nS5 Spec: UNAVAILABLE' > "$boundary_body"
+  run_case allow '最後一行無換行，狀態值靠字串結尾收邊'        "gh pr create --title t --body-file $boundary_body"
 
   printf '\n'
   if [ "$fails" -eq 0 ]; then
@@ -208,9 +215,13 @@ fi
 # PR body 檔案內容——body 越長越容易觸發，真實 PR body 正是長的。觸發時 exit 1 = 放行，
 # 也就是「PR body 寫得越完整，這道 gate 越可能不擋」，方向完全相反。
 # =~ 零 fork、零 pipeline，$BODY 多大都一樣。
+# 狀態值後面要求邊界：沒有它時 `PASSING`／`FAILSAFE`／`SKIPPEDX` 都會命中前綴而被放行。
+# 邊界是「非字母數字底線」而不只是空白——`SKIPPED（無 spec 檔）` 是本檔 deny 訊息自己給
+# 的範例，全形括號必須算邊界。BODY 是多行字串而 bash 的 =~ 沒有 multiline，所以 `$` 只
+# 匹配整份字串的結尾；行尾的換行由前半接住。
 missing=""
-[[ "$BODY" =~ S5[[:space:]]Standards:[[:space:]]*$STATUS_RE ]] || missing="S5 Standards"
-[[ "$BODY" =~ S5[[:space:]]Spec:[[:space:]]*$STATUS_RE ]] ||
+[[ "$BODY" =~ S5[[:space:]]Standards:[[:space:]]*$STATUS_RE([^A-Za-z0-9_]|$) ]] || missing="S5 Standards"
+[[ "$BODY" =~ S5[[:space:]]Spec:[[:space:]]*$STATUS_RE([^A-Za-z0-9_]|$) ]] ||
   missing="${missing:+$missing 與 }S5 Spec"
 
 [ -z "$missing" ] && exit 0
