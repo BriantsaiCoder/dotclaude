@@ -43,10 +43,12 @@ if [ "$parse_ok" -eq 0 ]; then
     *) exit 0 ;;
   esac
 
-  cat >&2 <<'EOF'
-[cookbook 守衛] 無法解析 hook payload，無從判斷目標是否在 docs/cookbook/ 下，保守拒絕。
-兩種可能：python3 不可用（確認已安裝且在 PATH 中），或 payload 不是合法 JSON（確認 host 傳入的 stdin 格式）。
-EOF
+  # 不用 here-doc：macOS 的 bash 3.2 把它的暫存檔開在 cwd 而非 TMPDIR，cwd 唯讀時
+  # redirect 失敗。本檔開了 set -e，於是連 exit 2 都走不到，改以 rc=1 結束——拒絕的
+  # 語意還在，但理由不見了，而 exit code 也不再是契約上的 2。printf 不碰暫存檔。
+  printf '%s\n' \
+    '[cookbook 守衛] 無法解析 hook payload，無從判斷目標是否在 docs/cookbook/ 下，保守拒絕。' \
+    '兩種可能：python3 不可用（確認已安裝且在 PATH 中），或 payload 不是合法 JSON（確認 host 傳入的 stdin 格式）。' >&2
   exit 2
 fi
 
@@ -70,11 +72,11 @@ cookbook_root="${file_path%%docs/cookbook/*}docs/cookbook"
 [ -f "$cookbook_root/MOC.md" ] && exit 0
 
 # MOC.md 不存在 → 阻擋
-cat >&2 <<EOF
-[cookbook 守衛] 偵測到要在 docs/cookbook/ 寫內容檔，但 $cookbook_root/MOC.md 不存在。
-直接寫入會產生無索引的孤兒檔（cookbook rot，見 ~/.claude/rules/cookbook.md）。
-請擇一：
-  1) 先建立 docs/cookbook/README.md + MOC.md 三層結構，再寫內容檔並同步 MOC 索引；
-  2) 若這次知識量不值得起一套 cookbook，改寫進 memory。
-EOF
+# 同上：不用 here-doc，cwd 唯讀時它會讓整個拒絕路徑走不完。
+printf '%s\n' \
+  "[cookbook 守衛] 偵測到要在 docs/cookbook/ 寫內容檔，但 $cookbook_root/MOC.md 不存在。" \
+  '直接寫入會產生無索引的孤兒檔（cookbook rot，見 ~/.claude/rules/cookbook.md）。' \
+  '請擇一：' \
+  '  1) 先建立 docs/cookbook/README.md + MOC.md 三層結構，再寫內容檔並同步 MOC 索引；' \
+  '  2) 若這次知識量不值得起一套 cookbook，改寫進 memory。' >&2
 exit 2

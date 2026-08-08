@@ -102,8 +102,14 @@ check_seg() {
   local seg="$1" win_seg="$2" t win_t
   local IFS=$' \t\n'
   local -a toks=() win_toks=() args=()
-  read -r -a toks <<< "$seg"
-  read -r -a win_toks <<< "$win_seg"
+  # 不用 here-string 切詞：macOS 的 bash 3.2 把 `<<<` 的暫存檔開在 **cwd** 而非 ${TMPDIR}，
+  # cwd 唯讀時 redirect 失敗 → 陣列留空 → 下面的迴圈一次都不跑 → 落到檔尾 exit 0＝放行。
+  # 2026-08-08 實測：cwd=/tmp（可寫）對 `git push --force origin main` 回 rc=2 攔截，
+  # cwd=~/.claude（sandbox 下唯讀）同一 payload 回 rc=0 放行。這是 [T0-3] 的 fail-open，
+  # 而且完全無聲——守衛的錯誤訊息進 stderr，host 只看 exit code。
+  # 純參數展開沒有暫存檔。本檔已 `set -f`（見檔頭 set -ufo），故未加引號的展開不會被 glob。
+  toks=($seg)
+  win_toks=($win_seg)
   local i seen_git=0 seen_push=0 has_force=0 has_lease=0 lease_exact=0 other_option=0
   for ((i = 0; i < ${#toks[@]}; i++)); do
     t=${toks[i]}
@@ -145,8 +151,15 @@ WIN_SEGMENTS=${SCAN_WIN//[\;\|\&]/$SEP}
 WIN_SEGMENTS=${WIN_SEGMENTS//$'\n'/$SEP}
 cmd_segments=()
 win_segments=()
-IFS="$SEP" read -r -a cmd_segments <<< "$CMD_SEGMENTS"
-IFS="$SEP" read -r -a win_segments <<< "$WIN_SEGMENTS"
+# 同 check_seg：不用 here-string，避免 cwd 唯讀時切段失敗而整段掃描被跳過（fail-open）。
+saved_ifs=$IFS
+IFS="$SEP"
+cmd_segments=($CMD_SEGMENTS)
+win_segments=($WIN_SEGMENTS)
+IFS=$saved_ifs
+# 這裡刻意不加「陣列為空就 deny」的備援：實測那條走不到。`[ -z "$CMD" ] && exit 0` 已擋掉
+# 空指令，而 bash 對非空白 IFS 的切詞會為連續分隔字元產生**空欄位**，所以 `;;;` 這種
+# 全分隔字元的輸入也會得到非空陣列。加了只會是「看起來有防護」的死碼。
 for ((seg_i = 0; seg_i < ${#cmd_segments[@]}; seg_i++)); do
   check_seg "${cmd_segments[seg_i]}" "${win_segments[seg_i]:-}"
 done

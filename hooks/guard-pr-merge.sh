@@ -325,7 +325,14 @@ SEP=$'\034'
 CMD_SEGMENTS=${SCAN//[\;\|\&]/$SEP}
 CMD_SEGMENTS=${CMD_SEGMENTS//$'\n'/$SEP}
 segments=()
-IFS="$SEP" read -r -a segments <<< "$CMD_SEGMENTS"
+# 不用 here-string 切段：macOS 的 bash 3.2 把 `<<<` 的暫存檔開在 **cwd** 而非 ${TMPDIR}，
+# cwd 唯讀時 redirect 失敗 → 陣列留空 → 下面找不到 merge 段 → exit 0＝放行。同型缺陷
+# 2026-08-08 在 guard-git-push.sh 實測確認（agents-config #70），此處一併修。
+# 純參數展開沒有暫存檔；本檔已 set -f（檔頭 set -ufo），未加引號的展開不會被 glob。
+saved_ifs=$IFS
+IFS="$SEP"
+segments=($CMD_SEGMENTS)
+IFS=$saved_ifs
 
 merge_seg=""
 for seg in "${segments[@]}"; do
@@ -368,7 +375,7 @@ CWD=$(printf '%s' "$INPUT" | "$JQ" -r '.cwd // empty' 2>/dev/null)
 for seg in "${segments[@]}"; do
   [ "$seg" = "$merge_seg" ] && break
   seg_toks=()
-  read -r -a seg_toks <<< "$seg"
+  seg_toks=($seg)   # 同上：不用 here-string，避免 cwd 唯讀時切詞失敗
   if [ "${seg_toks[0]:-}" = cd ]; then
     # normalize 已剝掉引號與反斜線，所以 `cd "/a b/c"` 到這裡是 `cd /a b/c`，
     # tokenization 會切成三段而取到 `/a`——用錯目錄，而錯的目錄可能有同號且
