@@ -127,13 +127,18 @@ else
 fi
 # 2026-08-08：[S5-3] 的 baseline 由兩條擴為五條。這裡同步擴充——host-local agent 由本
 # repo 自檢，~/.agents 的斷言跨 repo 抓不到，不擴的話新三條在這兩支上零守衛，而那正是
-# 上面整段註解在講的失效型態。後三條釘動作句即可，它本身已足夠唯一。
+# 上面整段註解在講的失效型態。
+#
+# 五條都放整行 bullet 原文，不只放動作句：只釘 `→` 之後那半句時，把 label 換成隨便的字、
+# 或把定義文字整段刪掉，守衛照樣回報「含五條全文」PASS（2026-08-08 實測）——那正是上面
+# 118-120 行寫「只放 `Reinvented Stdlib` 六個字的 stub 會過」要擋的事，stub 只是換到另
+# 一半而已。整行比對順帶釘住兩支之間的逐字一致。
 S53_RULES=(
-  '手刻標準庫或平台已提供的功能 → 指名該 API 取代。'
-  '為平台／既有模組已有的能力新增依賴 → 依選型階梯（原生 > 標準庫 > 既有模組 > 第三方 > 手寫）回退。'
-  '→ 指名既有符號並改呼叫它。'
-  '→ 內聯回去，等真的第二個使用點出現再抽。'
-  '→ 把該決策移回它該在的層。'
+  '- **Reinvented Stdlib** — 手刻標準庫或平台已提供的功能 → 指名該 API 取代。'
+  '- **Redundant Dependency** — 為平台／既有模組已有的能力新增依賴 → 依選型階梯（原生 > 標準庫 > 既有模組 > 第三方 > 手寫）回退。'
+  '- **Unused Local Reuse** — 這個 repo 裡已經有的 helper／type／pattern 被重寫一份。與「同一 diff 內重複」不同，這條看的是 diff 對**既有資產**的重複 → 指名既有符號並改呼叫它。'
+  '- **Needless Indirection** — 單一使用點的抽象層、只做轉發的中間層、或為 spec 沒有的需求預留的參數與 hook → 內聯回去，等真的第二個使用點出現再抽。'
+  '- **Wrong Altitude** — 抽象層級錯置：實作細節洩漏進高層介面，或高層策略埋進低層工具 → 把該決策移回它該在的層。'
 )
 for f in $S53_AGENTS; do
   if [ ! -f "$f" ]; then
@@ -142,7 +147,8 @@ for f in $S53_AGENTS; do
   fi
   s53_missing=0
   for rule in "${S53_RULES[@]}"; do
-    grep -Fq "$rule" "$f" || s53_missing=$((s53_missing + 1))
+    # `-e` 不可省：pattern 是整行 bullet、以 `-` 開頭，沒有 `-e` 時 grep 會把它當選項。
+    grep -Fq -e "$rule" "$f" || s53_missing=$((s53_missing + 1))
   done
   if [ "$s53_missing" -eq 0 ]; then
     ok "code review agent 含 [S5-3] baseline 五條全文: $f"
@@ -663,7 +669,7 @@ _no_tempfile_redirect() { # $1=守衛檔
     bad "守衛仍有 here-doc／here-string（上列），/tmp 與 cwd 皆不可寫時會 fail-open: $1"
   fi
 }
-for _g in hooks/guard-git-push.sh hooks/guard-pr-merge.sh hooks/guard-cookbook-orphan.sh; do
+for _g in hooks/guard-git-push.sh hooks/guard-pr-merge.sh hooks/guard-cookbook-orphan.sh hooks/guard-s5-ledger.sh; do
   [ -f "$_g" ] && _no_tempfile_redirect "$_g"
 done
 
@@ -678,6 +684,18 @@ if [ -f hooks/guard-pr-merge.sh ]; then
   else
     printf '%s\n' "$_prm_out" | tail -5
     bad "pr-merge 守衛 selftest 失敗（上列為輸出末段）"
+  fi
+fi
+
+# guard-s5-ledger 同理：它自帶 18 案 selftest（含 SIGPIPE 競態回歸），但註冊上線時沒有
+# 任何東西呼叫它。這支的失效模式是靜默 fail-open——PreToolUse 只有 exit 2 阻擋，任何
+# 意外的 exit 1 都等於放行——沒接線就沒有東西會發現它退化。
+if [ -f hooks/guard-s5-ledger.sh ]; then
+  if _s5l_out=$(bash hooks/guard-s5-ledger.sh --selftest 2>&1); then
+    ok "s5-ledger 守衛 selftest: $(printf '%s' "$_s5l_out" | tail -1)"
+  else
+    printf '%s\n' "$_s5l_out" | tail -5
+    bad "s5-ledger 守衛 selftest 失敗（上列為輸出末段）"
   fi
 fi
 
@@ -741,7 +759,9 @@ else
       bad "Bash audit invalid-payload failure 改動既有 metadata"
     fi
   fi
-  rm -r -- "$audit_home"
+  # -f 不可省：暫存 repo 裡的 git object 是唯讀的，互動 shell 下 rm 會停下來問
+  # `override r--r--r--?`，把測試卡住等輸入（非互動 shell 不會，所以很容易漏掉）。
+  rm -rf -- "$audit_home"
 fi
 
 audit_link_home="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || audit_link_home=""
@@ -761,7 +781,7 @@ else
   else
     bad "Bash audit symlink rejection 後仍改動 target"
   fi
-  rm -r -- "$audit_link_home"
+  rm -rf -- "$audit_link_home"
 fi
 
 if ! rg -q 'Package manager：npm|無則取最新 LTS' CLAUDE.md &&
@@ -801,7 +821,7 @@ if jq -e '
     else
       bad "git restore --staged allow 或行為 canary 不符"
     fi
-    rm -r -- "$unstage_dir"
+    rm -rf -- "$unstage_dir"
   fi
 else
   bad "git restore staged/source permission contract 不符"
@@ -827,13 +847,6 @@ jq -e '
   ((.permissions.ask | index("Bash(dangerouslyDisableSandbox:true)") != null)
     or (.sandbox.allowUnsandboxedCommands == false)
     or (.permissions.defaultMode == "auto")) and
-  (.permissions.deny | index("Edit(~/.claude/CLAUDE.md)") != null) and
-  (.permissions.deny | index("Edit(~/.claude/settings.json)") != null) and
-  (.permissions.deny | index("Edit(~/.claude/hooks/**)") != null) and
-  (.sandbox.filesystem.allowWrite | index("/Users/pochientsai/.claude") == null) and
-  (.sandbox.filesystem.denyWrite | index("~/.claude/CLAUDE.md") != null) and
-  (.sandbox.filesystem.denyWrite | index("~/.claude/settings.json") != null) and
-  (.sandbox.filesystem.denyWrite | index("~/.claude/hooks") != null) and
   ([.sandbox.network.allowMachLookup[] | select(test("launchd|launchctl"))] | length == 0)
 ' settings.json >/dev/null || launchctl_ok=0
 for unsafe_launchctl in \
@@ -852,6 +865,85 @@ if bash hooks/launchctl-readonly.sh version >/dev/null 2>&1; then
 elif [ "$?" -ne 69 ]; then
   launchctl_ok=0
 fi
+# ── ~/.claude 的 permission 邊界（獨立區塊，不寄生在 launchctl 的 ok/bad）────────────
+#
+# 2026-08-08：CLAUDE.md 與 hooks/** 的 permissions deny 由使用者裁決移除，settings.json
+# 與 .github/workflows/** 保留。三件事必須寫清楚，因為第一版註解全寫錯了：
+#
+# 1. `Edit(<path>)` 這一條 deny **同時擋 Edit、Write、NotebookEdit** —— 三個工具的權限
+#    檢查走同一個函式，而 bucket 解析只用 "Edit" 這個規則名做精確比對（Claude Code
+#    2.1.223 的判定鏈）。所以清單裡的 `Write(<path>)` 對檔案路徑**永遠不會被查詢**。
+#    留著它不是白留：deny 清單會逐字注入 auto-mode 的 Bash classifier prompt，它是
+#    classifier 的輸入，不是 hard gate。刪掉之前先讀這段。
+# 2. 移除那兩條 = 同時放棄三個工具的 hard block，剩下的是 harness 內建的 `.claude`
+#    sensitive floor（回 ask、classifier 可核准）與下面的 sandbox denyWrite。不是全開，
+#    但也不是鎖著。
+# 3. hook 在 Bash 沙箱**之外**以完整 user 權限執行（實測：audit-bash.sh 寫得進不在
+#    sandbox 白名單的路徑）。hooks/** 開放之後，改 hook 就是取得沙箱外執行路徑——這是
+#    這個裁決的實際代價，由下方的 hooks 內容指紋守衛承接。
+perm_ok=1
+jq -e '
+  (.permissions.deny | index("Edit(~/.claude/settings.json)") != null) and
+  (.permissions.deny | index("Write(~/.claude/settings.json)") != null) and
+  (.permissions.deny | index("Edit(~/.claude/.github/workflows/**)") != null) and
+  (.permissions.deny | index("Write(~/.claude/.github/workflows/**)") != null) and
+  # 上面四條之外，還要釘住這個邊界存在的理由本身：deny 清單一次編輯可以被刪光，而
+  # 只釘 4 條的話刪掉其餘 37 條測試照樣全綠（2026-08-08 mutation 實測）。這裡逐條釘住
+  # 註解點名的三條，並釘總數下限——新增 deny 不該讓測試紅，刪除才該。
+  (.permissions.deny | index("Read(~/.ssh/**)") != null) and
+  (.permissions.deny | index("Bash(sudo *)") != null) and
+  (.permissions.deny | index("Bash(rm -rf *)") != null) and
+  ((.permissions.deny | length) >= 48) and
+  # sandbox 這層要連開關一起釘：只釘 denyWrite 的內容而不釘 enabled，把 enabled 改成
+  # false 整層失效而測試全綠（同批 mutation 實測）。
+  (.sandbox.enabled == true) and
+  (.sandbox.filesystem.denyWrite | index("~/.claude/CLAUDE.md") != null) and
+  (.sandbox.filesystem.denyWrite | index("~/.claude/settings.json") != null) and
+  (.sandbox.filesystem.denyWrite | index("~/.claude/hooks") != null) and
+  # allowWrite 用集合比對而非單一字串：原本只擋 "/Users/pochientsai/.claude" 這個literal，
+  # 換成 tilde 形式或直接加父目錄 "/Users/pochientsai" 都能繞過（實測皆全綠），而父目錄
+  # 嚴格更糟——整個家目錄變成 sandbox 可寫。
+  ([.sandbox.filesystem.allowWrite[]
+     | select(. == "~/.claude" or . == "/Users/pochientsai/.claude"
+              or . == "~" or . == "$HOME" or . == "/Users/pochientsai")]
+   | length == 0)
+' settings.json >/dev/null || perm_ok=0
+if [ "$perm_ok" -eq 1 ]; then
+  ok "~/.claude permission 邊界：settings.json 與 .github/workflows 保持 deny；deny 清單未被削減；sandbox 已啟用且 allowWrite 不含 ~/.claude 或其父層"
+else
+  bad "~/.claude permission 邊界退化（settings.json／workflows 的 deny、deny 清單規模、sandbox.enabled、或 allowWrite 範圍其中之一）"
+fi
+
+# hooks 內容指紋。移除 Edit(~/.claude/hooks/**) 之後這是唯一的偵測面：CI 只驗形狀
+# （selftest 有沒有過、anchor 在不在、bash -n），「在既有 hook 尾端附加一行」全部照過。
+# 而 hook 在沙箱外執行，附加的那一行拿得到完整 user 權限。
+# 釘內容雜湊讓「改 hook」變成明示動作——改完必須同步更新這個檔，忘了就紅。
+if [ ! -f tests/hooks.sha256 ]; then
+  bad "tests/hooks.sha256 不存在——hooks/** 已無 Edit deny，內容指紋是唯一的偵測面"
+elif (cd hooks && shasum -a 256 -c ../tests/hooks.sha256 >/dev/null 2>&1); then
+  ok "hooks 內容指紋與 tests/hooks.sha256 一致"
+else
+  bad "hooks 內容與 tests/hooks.sha256 不符。改 hook 後請同步更新：cd hooks && shasum -a 256 *.sh *.py | sort -k2 > ../tests/hooks.sha256"
+fi
+
+# ~/.claude/.claude/ 對 cwd=~/.claude 的 session 是完整的 settings source（可註冊
+# PreToolUse hook、可加 permissions.allow），而 .gitignore 第 2 行的 `*` 讓 git 與 CI
+# 完全看不見它。這比 hooks/*.sh 威力更大——settings 可以裝 hook。
+if [ -e .claude/settings.json ] || [ -e .claude/settings.local.json ]; then
+  bad ".claude/ 下出現 settings*.json：它對 cwd=~/.claude 的 session 生效、被 .gitignore 吃掉、CI 看不見，且可註冊 hook"
+else
+  ok ".claude/ 未含 settings*.json（gitignored 且對 cwd=~/.claude 的 session 生效，是隱形的 settings source）"
+fi
+
+# statusline 每次 render 都執行，卻沒有任何 deny、不在 sandbox denyWrite、CI 零斷言。
+if [ ! -f statusline-command.sh ]; then
+  ok "statusline-command.sh 不存在（無此執行面）"
+elif bash -n statusline-command.sh 2>/dev/null; then
+  ok "statusline-command.sh 語法可解析"
+else
+  bad "statusline-command.sh 語法錯誤——它每次 statusline render 都會執行"
+fi
+
 if [ "$launchctl_ok" -eq 1 ]; then
   ok "launchctl direct／common env spellings deny；protected read-only wrapper 與 unsandbox 把關（ask／strict sandbox／classifier 三者之一）阻止靜默升級"
 else
@@ -863,6 +955,17 @@ if rg -Fq 'Verification scope 與 risk tier 由 `~/.agents/skills/dev-workflow/S
   ok "Opus 5 verification 指向 shared risk tiers，無 blanket rerun"
 else
   bad "CLAUDE.md 重複 verification method 或仍強制 blanket verification"
+fi
+
+# S5 之後的 apply pass 綁定。兩條一起釘：綁定本身，以及「不複製 method」——CLAUDE.md 第
+# 21 行自陳 host-local prose 不複製 kernel 的 method，而這條的第一版正是就地複製，且複製
+# 得比 kernel 弱（漏了「只回 S4 等於讓一批 code 繞過 [S5-1]」與 no-op 明述義務）。只釘綁定
+# 不釘後半，下一次就會有人把 method 抄回來、抄成另一個版本。
+if rg -Fq 'MUST 跑 `simplify` 當 apply pass' CLAUDE.md &&
+   rg -Fq '依 kernel `host-adapters.md` 的 Claude 節，此處不複製' CLAUDE.md; then
+  ok "S5 apply pass 綁定存在且指向 kernel，未就地複製 method"
+else
+  bad "CLAUDE.md 缺 S5 apply pass 綁定，或改成就地複製 kernel 的 method"
 fi
 
 if rg -Fq '已核准 scope 內的 local、reversible 工作 MUST 一次執行至完成' CLAUDE.md &&

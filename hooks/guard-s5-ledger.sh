@@ -14,7 +14,9 @@
 #   * fail-closed：是 gh pr create 但讀不到 body、jq 缺席、body-file 不可讀 → 一律拒絕。
 #   * 非 PR 建立指令安靜結束（無輸出、exit 0）。
 #   * 比對整個 command 字串，刻意接受誤擋，不解析 shell 語法——那會開出引號規避路徑。
-set -euo pipefail
+# 與 guard-git-push.sh／guard-pr-merge.sh 對齊，刻意**不用** -e：PreToolUse 只有 exit 2
+# 阻擋，任何意外的 exit 1 都是靜默放行，而 -e 正是把所有非預期失敗導向那裡的管道。
+set -ufo pipefail
 
 STATUS_RE='(PASS|FAIL|SKIPPED|UNAVAILABLE)'
 
@@ -101,7 +103,7 @@ ate --title t --body "nothing"'
 fi
 
 JQ="$(command -v jq 2>/dev/null || true)"
-INPUT="$(cat)"
+IFS= read -r -d '' INPUT || true   # bash 內建；用 $(cat) 會在 PATH 壞掉時 rc=127 放行
 
 # 正規化，與 guard-pr-merge.sh 同一套、同一順序：line continuation 必須最先移除，
 # 否則後面剝掉反斜線會留下裸 newline，把 `cre\<newline>ate` 永遠切成兩半。
@@ -172,11 +174,33 @@ if [ -n "$BODY_FILE" ]; then
   case "$BODY_FILE" in
     "~/"*) BODY_FILE="$HOME/${BODY_FILE#\~/}" ;;
   esac
-  if [ ! -r "$BODY_FILE" ]; then
-    deny "[S5-1] --body-file 指向 ${BODY_FILE}，但該檔不可讀，無從確認 S5 兩軸狀態，保守拒絕。"
+  # 相對路徑必須用 **gh 的 cwd** 解析，不是 hook 程序的 cwd。guard-pr-merge.sh 記過同型
+  # 實測坑：payload 的 .cwd 是 session 目錄，指令寫成 `cd X && gh …` 時實際執行目錄是 X。
+  # 驗錯目錄的後果是驗到另一份同名檔——上一輪殘留的 pr-body.md 是常態，於是 hook 看到帶
+  # ledger 的舊檔而 gh 送出沒有 ledger 的新檔，rc=0 放行。定位不了就 deny，不猜。
+  case "$BODY_FILE" in
+    /*) ;;
+    *)
+      case "$SCAN_CMD" in
+        cd[[:space:]]*|*[[:space:]]cd[[:space:]]*)
+          deny "[S5-1] 指令含 cd 且 --body-file 是相對路徑（${BODY_FILE}），無法可靠判定它相對於哪個目錄，保守拒絕。請改用絕對路徑。"
+          ;;
+      esac
+      HOOK_CWD="$(printf '%s' "$INPUT" | "$JQ" -r '.cwd // empty' 2>/dev/null || true)"
+      [ -n "$HOOK_CWD" ] ||
+        deny "[S5-1] --body-file 是相對路徑（${BODY_FILE}）但 payload 沒有 cwd，無從定位，保守拒絕。請改用絕對路徑。"
+      BODY_FILE="${HOOK_CWD%/}/${BODY_FILE}"
+      ;;
+  esac
+  # -f 不可省：`[ -r <dir> ]` 對目錄回 true，接著讀檔失敗——在有 -e 的版本是 exit 1 靜默
+  # 放行，沒有 -e 也只是留下空 BODY 同樣不擋。
+  if [ ! -f "$BODY_FILE" ] || [ ! -r "$BODY_FILE" ]; then
+    deny "[S5-1] --body-file 指向 ${BODY_FILE}，但它不是可讀的一般檔案，無從確認 S5 兩軸狀態，保守拒絕。"
   fi
-  # $(<file) 是 bash 內建讀檔,不 fork cat。
-  BODY="$BODY"$'\n'"$(<"$BODY_FILE")"
+  # 只比對檔案內容，不串 ${CMD}：串起來的話 --title／--label 等旗標值裡的狀態字串就能滿足
+  # 檢查，而真正送出的 body 可以完全沒有（實測 --label 'S5 Standards: PASS …' 即放行）。
+  # $(<file) 是 bash 內建讀檔，不 fork cat。
+  BODY="$(<"$BODY_FILE")"
 fi
 
 # 用 bash 內建 =~ 而非 `printf … | grep -Eq`，理由同上方路徑抽取，但這條更危險：
