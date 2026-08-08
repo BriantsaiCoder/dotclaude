@@ -32,6 +32,8 @@ Verification scope 與 risk tier 由 `~/.agents/skills/dev-workflow/SKILL.md` �
 
 中高風險或進 PR 的變更 MUST 跑 Standards 與 Spec 兩軸；條文 [S5-1]～[S5-4] 與 `UNAVAILABLE`（附 probe）的定義同在 `~/.agents/skills/dev-workflow/SKILL.md`。缺 reviewer capability 標 UNAVAILABLE，不得以自審頂替。
 
+兩軸 findings 處理完後 MUST 跑一次 `simplify` 當 apply pass：兩軸只報不修，它會動手改，涵蓋 [S5-3] baseline 五條落到實體 code 的部分。改動回 S4 重驗。此為 Claude-local 綁定，kernel 不要求其他 host 有等價 skill。
+
 ### S6 CLOSEOUT
 
 Local checkpoint commit 僅依 shared `authorization-matrix`；push／open PR／merge／final closeout 仍依 shared [INT-1]、[T0-9] 與 `review-triage`。預設 squash merge，合併後清理已合併 branch。

@@ -173,7 +173,7 @@ if [ -n "$BODY_FILE" ]; then
     "~/"*) BODY_FILE="$HOME/${BODY_FILE#\~/}" ;;
   esac
   if [ ! -r "$BODY_FILE" ]; then
-    deny "[S5-1] --body-file 指向 $BODY_FILE，但該檔不可讀，無從確認 S5 兩軸狀態，保守拒絕。"
+    deny "[S5-1] --body-file 指向 ${BODY_FILE}，但該檔不可讀，無從確認 S5 兩軸狀態，保守拒絕。"
   fi
   # $(<file) 是 bash 內建讀檔,不 fork cat。
   BODY="$BODY"$'\n'"$(<"$BODY_FILE")"

@@ -125,14 +125,29 @@ if [ "$actual_agents" = "$expected_agents" ]; then
 else
   bad "agents/ 清單已變動，[S5-3] 分類需更新：實際=[$actual_agents] 已分類=[$expected_agents]"
 fi
+# 2026-08-08：[S5-3] 的 baseline 由兩條擴為五條。這裡同步擴充——host-local agent 由本
+# repo 自檢，~/.agents 的斷言跨 repo 抓不到，不擴的話新三條在這兩支上零守衛，而那正是
+# 上面整段註解在講的失效型態。後三條釘動作句即可，它本身已足夠唯一。
+S53_RULES=(
+  '手刻標準庫或平台已提供的功能 → 指名該 API 取代。'
+  '為平台／既有模組已有的能力新增依賴 → 依選型階梯（原生 > 標準庫 > 既有模組 > 第三方 > 手寫）回退。'
+  '→ 指名既有符號並改呼叫它。'
+  '→ 內聯回去，等真的第二個使用點出現再抽。'
+  '→ 把該決策移回它該在的層。'
+)
 for f in $S53_AGENTS; do
   if [ ! -f "$f" ]; then
     bad "[S5-3] 分類指向不存在的 agent: $f"
-  elif grep -Fq '手刻標準庫或平台已提供的功能 → 指名該 API 取代。' "$f" &&
-    grep -Fq '為平台／既有模組已有的能力新增依賴 → 依選型階梯（原生 > 標準庫 > 既有模組 > 第三方 > 手寫）回退。' "$f"; then
-    ok "code review agent 含 [S5-3] baseline 兩條全文: $f"
+    continue
+  fi
+  s53_missing=0
+  for rule in "${S53_RULES[@]}"; do
+    grep -Fq "$rule" "$f" || s53_missing=$((s53_missing + 1))
+  done
+  if [ "$s53_missing" -eq 0 ]; then
+    ok "code review agent 含 [S5-3] baseline 五條全文: $f"
   else
-    bad "code review agent 缺 [S5-3] over-engineering baseline 兩條全文: $f"
+    bad "code review agent 缺 [S5-3] over-engineering baseline $s53_missing 條全文: $f"
   fi
 done
 
