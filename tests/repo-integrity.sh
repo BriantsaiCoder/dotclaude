@@ -334,8 +334,14 @@ else
     [ -n "$_cb_err" ] && printf '%s:reason\n' "$_cb_rc" || printf '%s:silent\n' "$_cb_rc"
   }
   # mktemp 失敗不能 exit——那會跳過下面的總結與「至少跑到了」自證，讓整份測試靜默短路。
-  _nopy=$(mktemp -d) || _nopy=""
-  _cb_dir=$(mktemp -d) || _cb_dir=""
+  #
+  # template 不可省（本檔七處皆同）：macOS 的 mktemp 在沒有 template 時走
+  # confstr(_CS_DARWIN_USER_TEMP_DIR)（/var/folders/…/T/）而**忽略 $TMPDIR**，於是在
+  # 只放行 $TMPDIR 的 sandbox 下七處全部 mkdtemp 失敗。fail-closed 分支會照實報，
+  # 但整份測試因此產出 16 個假 FAIL（2026-08-08 實測），等於在 sandbox 內不可用——
+  # 而「在 sandbox 內跑不動」會直接讓自動化執行點無法採用這支測試。
+  _nopy=$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX") || _nopy=""
+  _cb_dir=$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX") || _cb_dir=""
   if [ -z "$_nopy" ] || [ -z "$_cb_dir" ]; then
     bad "cookbook 守衛：無法建立暫存目錄，fail-closed 檢查未執行"
     [ -n "$_nopy" ] && rm -rf "$_nopy"
@@ -416,7 +422,7 @@ else
   # （用不存在的路徑當錯誤 fixture，比 chmod 000 穩定且不受執行身分影響）。
   # fixture 放 mktemp 不放 repo 內，否則會被下面的實掃掃到；全形字元用 printf octal
   # 組出來不寫字面，同理。
-  canary_dir="$(mktemp -d)" || canary_dir=""
+  canary_dir="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || canary_dir=""
   if [ -z "$canary_dir" ]; then
     bad "shell 變數名 pattern canary 無法建立 fixture"
   else
@@ -545,7 +551,7 @@ else
   bad "git push guard 缺 pipefail，pipeline error 可能被後段命令遮蔽"
 fi
 
-push_probe_dir="$(mktemp -d)" || push_probe_dir=""
+push_probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || push_probe_dir=""
 _push_probe() { # $1=allow|deny $2=command
   local want="$1" cmd="$2" rc actual
   [ -n "$push_probe_dir" ] ||
@@ -592,7 +598,7 @@ _push_probe deny  'git push --force-with-lease --all origin'
 _push_probe deny  'git push --mirror origin'
 [ -z "$push_probe_dir" ] || rm -rf "$push_probe_dir"
 
-audit_home="$(mktemp -d)" || audit_home=""
+audit_home="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || audit_home=""
 if [ -z "$audit_home" ]; then
   bad "Bash audit metadata canary 無法建立 temp HOME"
 else
@@ -631,7 +637,7 @@ else
   rm -r -- "$audit_home"
 fi
 
-audit_link_home="$(mktemp -d)" || audit_link_home=""
+audit_link_home="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || audit_link_home=""
 if [ -z "$audit_link_home" ]; then
   bad "Bash audit symlink canary 無法建立 temp HOME"
 else
@@ -666,7 +672,7 @@ if jq -e '
   (.permissions.deny | index("Bash(git restore *--source*)") != null) and
   ([.autoMode.soft_deny[] | select(test("git restore[^\"]*--staged"))] | length == 0)
 ' settings.json >/dev/null; then
-  unstage_dir="$(mktemp -d)" || unstage_dir=""
+  unstage_dir="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || unstage_dir=""
   if [ -z "$unstage_dir" ]; then
     bad "git restore --staged canary 無法建立 temp repo"
   else
