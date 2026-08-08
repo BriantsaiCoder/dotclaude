@@ -552,12 +552,15 @@ else
 fi
 
 push_probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || push_probe_dir=""
-_push_probe() { # $1=allow|deny $2=command
-  local want="$1" cmd="$2" rc actual
+# 上面的 subshell 會 cd 走，相對路徑會失效
+_guard_push_abs="$PWD/hooks/guard-git-push.sh"
+_push_probe() { # $1=allow|deny $2=command [$3=執行時的 cwd，預設 repo root]
+  local want="$1" cmd="$2" run_cwd="${3:-$PWD}" rc actual label=""
   [ -n "$push_probe_dir" ] ||
     { bad "git push guard 無法建立輸出檢查目錄"; return; }
+  [ "$run_cwd" = "$PWD" ] || label="（唯讀 cwd）"
   if jq -nc --arg command "$cmd" '{tool_input:{command:$command},cwd:"."}' |
-    bash hooks/guard-git-push.sh --format=claude \
+    ( cd "$run_cwd" && bash "$_guard_push_abs" --format=claude ) \
       >"$push_probe_dir/stdout" 2>"$push_probe_dir/stderr"; then
     rc=0
   else
@@ -580,9 +583,9 @@ _push_probe() { # $1=allow|deny $2=command
     actual="BADEXIT($rc)"
   fi
   if [ "$actual" = "$want" ]; then
-    ok "git push guard $want: $cmd"
+    ok "git push guard ${want}${label}: $cmd"
   else
-    bad "git push guard want=$want got=$actual rc=$rc: $cmd"
+    bad "git push guard want=$want got=$actual rc=${rc}${label}: $cmd"
   fi
 }
 _push_probe allow 'git push --all origin'
@@ -596,6 +599,67 @@ _push_probe deny  'GIT push --force origin main'
 _push_probe allow 'legit.exe push --force origin main'
 _push_probe deny  'git push --force-with-lease --all origin'
 _push_probe deny  'git push --mirror origin'
+
+# ── 守衛不得依賴暫存檔 redirect（2026-08-08，dotclaude PR #21 review）──────────
+#
+# 缺陷：macOS 的 bash 3.2 把 here-doc／here-string 的暫存檔放在 /tmp（忽略 TMPDIR），
+# /tmp 不可寫時才退回 cwd。兩者皆不可寫時 redirect 失敗——守衛的切詞陣列留空、掃描
+# 迴圈一次都不跑、落到檔尾 exit 0＝放行。實測 sandbox 內（/tmp 被擋、本 repo 唯讀）
+# 同一個 force-push payload 由 rc=2 變成 rc=0，且無聲。
+#
+# 這條刻意是**靜態**斷言：行為測試在一般環境重現不了（/tmp 可寫時缺陷不發作，chmod
+# 一個 cwd 也擋不住），寫成行為案例就會在 CI 上恆綠——那正是本檔要抓的假綠形狀。
+# 靜態斷言則到哪都成立：只要切詞路徑重新出現 here-doc／here-string 就紅。
+#
+# 只掃非註解行：本 repo 的守衛註解本身會提到這些字元，掃進去會恆紅。
+_no_tempfile_redirect() { # $1=守衛檔
+  local hits
+  hits=$(grep -vE '^[[:space:]]*#' "$1" | grep -E '<<<|<<-?[[:space:]]*.?[A-Za-z_]') || hits=""
+  if [ -z "$hits" ]; then
+    ok "守衛不依賴暫存檔 redirect: $1"
+  else
+    printf '%s\n' "$hits" | head -3
+    bad "守衛仍有 here-doc／here-string（上列），/tmp 與 cwd 皆不可寫時會 fail-open: $1"
+  fi
+}
+for _g in hooks/guard-git-push.sh hooks/guard-pr-merge.sh hooks/guard-cookbook-orphan.sh; do
+  [ -f "$_g" ] && _no_tempfile_redirect "$_g"
+done
+
+# guard-pr-merge 的行為覆蓋（同一次 review 指出本檔完全沒有）。
+#
+# 不另寫 payload 案例：該守衛自帶 --selftest，用假 PR_REVIEW_GATE 把每個 STATE 對到
+# 明確的放行／拒絕。缺的從來不是測試，是沒有人呼叫它——接線比重寫一份會漂移的副本
+# 便宜，也不會有兩份對不上的期望值。
+if [ -f hooks/guard-pr-merge.sh ]; then
+  if _prm_out=$(bash hooks/guard-pr-merge.sh --selftest 2>&1); then
+    ok "pr-merge 守衛 selftest: $(printf '%s' "$_prm_out" | tail -1)"
+  else
+    printf '%s\n' "$_prm_out" | tail -5
+    bad "pr-merge 守衛 selftest 失敗（上列為輸出末段）"
+  fi
+fi
+
+# 行為案例只在條件真的成立時才跑：/tmp 可寫就重現不了，標 SKIP 而不是給一個
+# 沒有意義的綠。sandbox 內 /tmp 被擋，這兩條才有鑑別力。
+if [ -n "$push_probe_dir" ]; then
+  if ( : > /tmp/.repo-integrity-tmpwrite ) 2>/dev/null; then
+    rm -f /tmp/.repo-integrity-tmpwrite
+    printf '  SKIP  唯讀 cwd 行為案例：/tmp 可寫，此環境重現不了 here-doc fallback\n'
+  else
+    _ro_cwd="$push_probe_dir/readonly-cwd"
+    mkdir -p "$_ro_cwd" && chmod 500 "$_ro_cwd"
+    if ( cd "$_ro_cwd" && : > .probe-write ) 2>/dev/null; then
+      rm -f "$_ro_cwd/.probe-write"
+      printf '  SKIP  唯讀 cwd 行為案例：chmod 500 仍可寫（root？），條件建不起來\n'
+    else
+      _push_probe deny  'git push --force origin main' "$_ro_cwd"
+      _push_probe allow 'git push origin feat/safe'    "$_ro_cwd"
+    fi
+    chmod 700 "$_ro_cwd" 2>/dev/null || true
+  fi
+fi
+
 [ -z "$push_probe_dir" ] || rm -rf "$push_probe_dir"
 
 audit_home="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || audit_home=""
