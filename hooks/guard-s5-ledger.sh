@@ -52,6 +52,15 @@ if [ "${1:-}" = "--selftest" ]; then
     exit 1
   }
   trap 'rm -rf "$tmpdir"' EXIT
+  # mktemp 成功不等於 fixture 寫得進去（唯讀掛載、配額滿、目錄權限被改都會讓 mkdir 過而
+  # 寫入失敗）。而 run_case 只看 rc、不看 stderr、也不驗 fixture 存在，所以任何一條讓
+  # fixture 寫不出來的路徑，都會讓**整個 deny 半邊因「body-file 不可讀」而假 PASS**——
+  # 與 mktemp 失敗時完全同一個形狀。守 mktemp 只擋掉觀察到的那一條，這個 canary 擋整類。
+  printf 'canary\n' > "$tmpdir/.canary" 2>/dev/null
+  if [ ! -s "$tmpdir/.canary" ]; then
+    printf 'selftest 無法在暫存目錄寫入 fixture（deny 案例會因檔案不存在而假 PASS）：%s\n' "$tmpdir" >&2
+    exit 1
+  fi
   fails=0
 
   run_case() {

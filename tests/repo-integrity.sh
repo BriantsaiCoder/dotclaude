@@ -1017,34 +1017,53 @@ fi
 # 從 settings.json 的註冊處推導而非硬編清單：將來任何未加 `bash ` 前綴註冊的 hook 自動
 # 被涵蓋，不必記得回來加名字。比對走 repo 相對路徑（hooks/<basename>）而不是註冊字串裡的
 # ~/.claude/…，因為 CI 的 checkout 不在 $HOME/.claude；git 有保存 100755 所以 CI 驗得到。
+# 篩選只用一條「路徑前綴」規則，不用副檔名白名單、也不列舉 interpreter：
+#   * 副檔名白名單（*.sh|*.py）會靜默漏掉 extensionless、.mjs 等註冊形狀，而本區塊自稱
+#     「將來任何未加 bash 前綴註冊的 hook 自動被涵蓋」——白名單直接違背那句話。
+#   * 列舉 interpreter（bash /sh /...）永遠列不完（env bash、zsh、python3），而且不必列：
+#     帶前綴的指令第一個 token 是 interpreter，本來就不以 ~/.claude/hooks/ 開頭。
+#   * 只認 ~/.claude/hooks/ 之下的路徑，順帶擋掉 basename 對撞——否則註冊
+#     /opt/tools/audit-bash.sh 會被拿去驗 hooks/audit-bash.sh 的 exec bit 而假 PASS。
+# 已知邊界（不宣稱涵蓋）：註冊在 hooks/ 之外的直接 exec 腳本（例如 ~/.claude/scripts/、
+# ${CLAUDE_PLUGIN_ROOT}/…）不在此斷言範圍內，本區塊只負責本 repo 的 hooks/。
+# allow 規則的尾綴用 sub 而非 rtrimstr：rtrimstr 只吃精確後綴，而 `Bash(cmd:*)` 是本檔
+# 現行慣例（Bash(git status:*)、Bash(git add:*)、Bash(git commit:*)），`Bash(cmd)` 也是
+# 合法的無參數寫法——兩者用 rtrimstr(" *)") 都會殘留字元而被靜默丟掉，丟掉的正好是
+# launchctl-readonly.sh，CLAUDE.md 指定的唯一 launchctl 管道。2026-08-08 S5 兩軸實測。
 _execbit_missing=""
 _execbit_absent=""
 _execbit_n=0
-_execbit_cmds="$(jq -r '
-  [ (.hooks // {} | to_entries[].value[]?.hooks[]?.command),
-    (.permissions.allow[]? | select(startswith("Bash(~/.claude/hooks/"))
-                           | ltrimstr("Bash(") | rtrimstr(" *)")) ]
-  | .[] | select(. != null and . != "")' settings.json 2>/dev/null)"
+_execbit_reg=0
 while IFS= read -r _cmd; do
   [ -n "$_cmd" ] || continue
-  case "$_cmd" in bash\ *|sh\ *|/bin/bash\ *|/bin/sh\ *) continue ;; esac
+  _execbit_reg=$((_execbit_reg + 1))
+  case "$_cmd" in
+    "~/.claude/hooks/"*|"$HOME/.claude/hooks/"*) ;;
+    *) continue ;;
+  esac
   _base="${_cmd%% *}"; _base="${_base##*/}"
-  case "$_base" in *.sh|*.py) ;; *) continue ;; esac
   _execbit_n=$((_execbit_n + 1))
   if [ ! -f "hooks/$_base" ]; then
     _execbit_absent="$_execbit_absent hooks/$_base"
   elif [ ! -x "hooks/$_base" ]; then
     _execbit_missing="$_execbit_missing hooks/$_base"
   fi
-done <<EOF
-$_execbit_cmds
-EOF
-if [ "$_execbit_n" -eq 0 ]; then
-  bad "推導不到任何直接 exec 的 hook——註冊格式可能已變，這道斷言失去依據（不是通過）"
-elif [ -n "$_execbit_absent" ]; then
-  bad "註冊為直接 exec 但檔案不存在：$_execbit_absent"
-elif [ -n "$_execbit_missing" ]; then
-  bad "直接 exec 註冊的 hook 缺 exec bit，會靜默失效（chmod +x 修復）：$_execbit_missing"
+done < <(jq -r '
+  [ (.hooks // {} | to_entries[].value[]?.hooks[]?.command),
+    (.permissions.allow[]? | select(test("^Bash\\((~|\\$HOME)/\\.claude/hooks/"))
+                           | ltrimstr("Bash(") | sub("[ :*)]+$";"")) ]
+  | .[] | select(. != null and . != "")' settings.json 2>/dev/null)
+# 三個狀態要分開，不能合成一個 n==0：
+#   * 讀不到任何註冊 → settings.json 壞了或 schema 漂移，bad。
+#   * 有註冊但沒有直接 exec 的 → 全部改成 bash 前綴了，那是**強化**（曝險面歸零），
+#     必須 ok。合成 n==0 會讓最理想的修法報紅，與本檔「新增不會紅、刪除才會」相牴觸，
+#     也正是 PR #25 apply pass 對 `== 1` 的同一條批評。
+if [ "$_execbit_reg" -eq 0 ]; then
+  bad "讀不到任何 hook 註冊（settings.json 不可解析、jq 缺席、或註冊 schema 已變）——這道斷言失去依據，不是通過"
+elif [ "$_execbit_n" -eq 0 ]; then
+  ok "settings.json 沒有直接 exec 的 hook 註冊（共 $_execbit_reg 筆皆帶 interpreter 前綴）——exec bit 曝險面為零"
+elif [ -n "$_execbit_absent" ] || [ -n "$_execbit_missing" ]; then
+  bad "直接 exec 的 hook 有問題（一次列全）：檔案不存在[${_execbit_absent# }] 缺 exec bit[${_execbit_missing# }]（chmod +x 修復）"
 else
   ok "直接 exec 註冊的 $_execbit_n 支 hook 皆保有 exec bit（清單推導自 settings.json 註冊處）"
 fi
