@@ -881,9 +881,16 @@ fi
 # 3. hook 在 Bash 沙箱**之外**以完整 user 權限執行（實測：audit-bash.sh 寫得進不在
 #    sandbox 白名單的路徑）。hooks/** 開放之後，改 hook 就是取得沙箱外執行路徑——這是
 #    這個裁決的實際代價，由下方的 hooks 內容指紋守衛承接。
+# 4. 2026-08-08 第二次裁決：`Edit(~/.claude/settings.json)` 由使用者明示移除，改走官方的
+#    user-directed edit 路徑——`.claude` 是 protected path，`permissions.allow` 無法預先核准，
+#    auto mode 下寫入 routed to the classifier（見 /docs/en/permission-modes#protected-paths）。
+#    所以這一條**反過來斷言它不存在**：它被加回來才是回歸，會靜默取消使用者的裁決。
+#    `Write(~/.claude/settings.json)` 依上面第 1 點保留——它擋不住檔案工具，但它是 Bash
+#    classifier prompt 的輸入，而實測 38.9% 的 Bash 呼叫走 unsandboxed retry（2026-08-08，
+#    4.5 天 1308/3359），那條路上 sandbox denyWrite 不生效，classifier 是唯一剩下的守門。
 perm_ok=1
 jq -e '
-  (.permissions.deny | index("Edit(~/.claude/settings.json)") != null) and
+  (.permissions.deny | index("Edit(~/.claude/settings.json)") == null) and
   (.permissions.deny | index("Write(~/.claude/settings.json)") != null) and
   (.permissions.deny | index("Edit(~/.claude/.github/workflows/**)") != null) and
   (.permissions.deny | index("Write(~/.claude/.github/workflows/**)") != null) and
@@ -909,9 +916,9 @@ jq -e '
    | length == 0)
 ' settings.json >/dev/null || perm_ok=0
 if [ "$perm_ok" -eq 1 ]; then
-  ok "~/.claude permission 邊界：settings.json 與 .github/workflows 保持 deny；deny 清單未被削減；sandbox 已啟用且 allowWrite 不含 ~/.claude 或其父層"
+  ok "~/.claude permission 邊界：settings.json 的 Edit deny 依裁決維持移除、Write deny 保留；.github/workflows 兩條保持 deny；deny 清單未被削減；sandbox 已啟用且 allowWrite 不含 ~/.claude 或其父層"
 else
-  bad "~/.claude permission 邊界退化（settings.json／workflows 的 deny、deny 清單規模、sandbox.enabled、或 allowWrite 範圍其中之一）"
+  bad "~/.claude permission 邊界退化（settings.json 的 Edit deny 被加回或 Write deny 被刪、workflows 的 deny、deny 清單規模、sandbox.enabled、或 allowWrite 範圍其中之一）"
 fi
 
 # hooks 內容指紋。移除 Edit(~/.claude/hooks/**) 之後這是唯一的偵測面：CI 只驗形狀
