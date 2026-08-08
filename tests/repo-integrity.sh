@@ -622,8 +622,20 @@ _no_tempfile_redirect() { # $1=守衛檔
   # 檔名前的 `--` 不可省：路徑以 `-` 開頭時 grep 會當成 option，輸出自己的說明而非
   # 守衛內容，hits 為空 → 靜態斷言靜默通過（2026-08-08 agents-config #71 review）。
   # 本檔的呼叫端是字面清單、不由環境覆寫，但同一形狀不留兩種寫法。
-  hits=$(grep -vE '^[[:space:]]*#' -- "$1" | grep -E '<<-?[[:space:]]*[^=[:space:]]') || hits=""
-  if [ -z "$hits" ]; then
+  # grep 的 rc 必須分辨（rc>=2 是錯誤，不是「無命中」），且兩個 grep 要拆開跑：
+  # pipefail 回的是最右的非零狀態，第一個 grep 的 rc=2 會被第二個的 rc=1 遮掉，
+  # 於是「讀不到」被當成「乾淨」（2026-08-08 agents-config #71 review 實測確認）。
+  local src="" rc=0 hits_rc=0
+  hits=""
+  src="$(grep -vE '^[[:space:]]*#' -- "$1")" || rc=$?
+  if [ "$rc" -ge 2 ]; then
+    bad "靜態掃描讀不到守衛內容（grep rc=${rc}）: $1"
+    return
+  fi
+  hits="$(printf '%s\n' "$src" | grep -E '<<-?[[:space:]]*[^=[:space:]]')" || hits_rc=$?
+  if [ "$hits_rc" -ge 2 ]; then
+    bad "靜態掃描自身失敗（grep rc=${hits_rc}）: $1"
+  elif [ -z "$hits" ]; then
     ok "守衛不依賴暫存檔 redirect: $1"
   else
     printf '%s\n' "$hits" | head -3
