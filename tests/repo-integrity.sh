@@ -619,7 +619,10 @@ _push_probe deny  'git push --mirror origin'
 # 實測確認）。代價是算術左移會誤報；守備的是安全閘，噪音比靜默漏放便宜。
 _no_tempfile_redirect() { # $1=守衛檔
   local hits
-  hits=$(grep -vE '^[[:space:]]*#' "$1" | grep -E '<<-?[[:space:]]*[^=[:space:]]') || hits=""
+  # 檔名前的 `--` 不可省：路徑以 `-` 開頭時 grep 會當成 option，輸出自己的說明而非
+  # 守衛內容，hits 為空 → 靜態斷言靜默通過（2026-08-08 agents-config #71 review）。
+  # 本檔的呼叫端是字面清單、不由環境覆寫，但同一形狀不留兩種寫法。
+  hits=$(grep -vE '^[[:space:]]*#' -- "$1" | grep -E '<<-?[[:space:]]*[^=[:space:]]') || hits=""
   if [ -z "$hits" ]; then
     ok "守衛不依賴暫存檔 redirect: $1"
   else
