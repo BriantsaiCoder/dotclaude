@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "cleanupPeriodDays": 90,
+  "cleanupPeriodDays": 30,
   "env": {
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000",
     "DOTNET_CLI_HOME": "/Users/pochientsai/.dotnet",
@@ -17,14 +17,12 @@
       "Bash(git commit:*)",
       "Bash(git restore --staged -- *)",
       "Bash(git push --force-with-lease *)",
-      "Bash(dotnet dev-certs *)",
       "Bash(gh pr *)",
       "Bash(gh issue *)",
       "Bash(gh run *)",
       "Bash(gh repo view *)",
       "Bash(gh auth status)",
       "Bash(jq *)",
-      "Bash(sqlite3 *)",
       "Bash(~/.claude/hooks/launchctl-readonly.sh *)",
       "mcp__plugin_context7_context7__resolve-library-id",
       "mcp__plugin_context7_context7__query-docs",
@@ -37,7 +35,9 @@
       "mcp__plugin_github_github__get_file_contents",
       "mcp__plugin_github_github__get_me"
     ],
-    "ask": [],
+    "ask": [
+      "Bash(dotnet dev-certs *)"
+    ],
     "deny": [
       "Read(//**/.env)",
       "Read(//**/.env.*)",
@@ -67,7 +67,6 @@
       "Edit(~/.bash_profile)",
       "Edit(~/.profile)",
       "Edit(~/.gitconfig)",
-      "Edit(~/.claude/settings.json)",
       "Write(~/.claude/.github/workflows/**)",
       "Edit(~/.claude/.github/workflows/**)",
       "Write(~/.claude/settings.json)",
@@ -86,7 +85,12 @@
       "Bash(/usr/bin/env /bin/launchctl *)",
       "Bash(defaults write *)",
       "Bash(sudo *)",
-      "Bash(rm -rf *)"
+      "Bash(rm -*)",
+      "Bash(env rm *)",
+      "Bash(env /bin/rm *)",
+      "Bash(/usr/bin/env rm *)",
+      "Bash(/usr/bin/env /bin/rm *)",
+      "Bash(/bin/rm *)"
     ],
     "defaultMode": "auto",
     "disableBypassPermissionsMode": "disable",
@@ -227,12 +231,6 @@
         "source": "github",
         "repo": "DietrichGebert/ponytail"
       }
-    },
-    "superpowers-marketplace": {
-      "source": {
-        "source": "github",
-        "repo": "obra/superpowers-marketplace"
-      }
     }
   },
   "language": "zh-TW",
@@ -346,12 +344,10 @@
   },
   "alwaysThinkingEnabled": true,
   "effortLevel": "xhigh",
-  "autoCompactWindow": 1000000,
   "advisorModel": "opus",
   "autoUpdatesChannel": "latest",
   "tui": "fullscreen",
   "showThinkingSummaries": true,
-  "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
   "remoteControlAtStartup": true,
   "agentPushNotifEnabled": true,
@@ -378,7 +374,7 @@
       "$defaults",
       "Never merge a pull request unless ~/.agents/bin/pr-review-gate reported STATE=PASS or STATE=PASS_NO_CI for that PR at the current head SHA in this session. PASS_NO_CI is the gate's degraded state, returned only when it confirmed no CI run was ever created for that commit — never when CI is merely pending, failing, or still queued. It is a deliberate narrow allowance, not a wildcard: every other STATE remains forbidden, including future states whose names begin with PASS.",
       "Never delete, transfer, or change the visibility of a GitHub repository, and never delete releases or tags.",
-      "Never write to files under the user's home directory outside the session's working directory, ~/.claude, and ~/.agents — this includes ~/Documents, ~/Desktop, ~/Pictures, ~/Library, and shell startup files. Inside ~/.claude only settings.json and .github/workflows/ carry Edit deny rules; CLAUDE.md and hooks/ rely on sandbox denyWrite plus the built-in .claude sensitive-file floor, and hooks/ additionally on the content fingerprint pinned in tests/hooks.sha256; that protection covers editing those files and nothing else. It does not extend to git bookkeeping: staging, committing, or pushing those paths writes ~/.claude/.git (index, objects, refs), never the files themselves, and is ordinary version control of the user's own repository — allowed, including when a path argument names one of the protected files."
+      "Never write to files under the user's home directory outside the session's working directory, ~/.claude, and ~/.agents — this includes ~/Documents, ~/Desktop, ~/Pictures, ~/Library, and shell startup files. Inside ~/.claude only .github/workflows/ carries an Edit deny rule; settings.json no longer does, so the built-in .claude protected-path check gates it instead, and permissions.allow cannot pre-approve that check. Never widen a permission, hook, or sandbox boundary in settings.json on your own initiative — unconditionally, in every mode: an instruction to review, tidy, or improve the settings never authorizes widening one. Bash and Write-tool writes to settings.json have no hard block at all: sandbox denyWrite covers the sandboxed path only, and the Write(~/.claude/settings.json) deny entry is a signal to this classifier rather than a gate. Route every settings.json change through the Edit tool, where the diff is visible — never shell redirection, never a Write-tool whole-file overwrite. CLAUDE.md and hooks/ rely on sandbox denyWrite plus the same protected-path check, and hooks/ additionally on the content fingerprint pinned in tests/hooks.sha256; that protection covers editing those files and nothing else. It does not extend to git bookkeeping: staging, committing, or pushing those paths writes ~/.claude/.git (index, objects, refs), never the files themselves, and is ordinary version control of the user's own repository — allowed, including when a path argument names one of the protected files."
     ],
     "environment": [
       "$defaults",

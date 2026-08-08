@@ -881,19 +881,84 @@ fi
 # 3. hook 在 Bash 沙箱**之外**以完整 user 權限執行（實測：audit-bash.sh 寫得進不在
 #    sandbox 白名單的路徑）。hooks/** 開放之後，改 hook 就是取得沙箱外執行路徑——這是
 #    這個裁決的實際代價，由下方的 hooks 內容指紋守衛承接。
+# 4. 2026-08-08 第二次裁決：`Edit(~/.claude/settings.json)` 由使用者明示移除，改走官方的
+#    user-directed edit 路徑——`.claude` 屬 protected path，`permissions.allow` 無法預先核准
+#    那道檢查（見 /docs/en/permission-modes#protected-paths；文件叫 protected path，harness
+#    的使用者可見字串叫 sensitive file，上面第 2 點用的是後者，同一個機制）。所以這一條
+#    **反過來斷言它不存在**：它被加回來才是回歸，會靜默取消使用者的裁決。
+#    但反轉極性同時反轉了 fail-safety。`index()` 是精確字串比對：正極性下任何拼法變體都
+#    讓測試紅（安全方向），反極性下任何變體都讓它綠。2026-08-08 mutation 實測三種 re-add
+#    全部通過——`Edit(~/.claude/settings*.json)`（glob，harness 支援；本清單自己就在用）、
+#    `Edit(/Users/pochientsai/.claude/settings.json)`（絕對路徑）、尾隨空白。所以改成 regex
+#    掃整個陣列，比照下方 allowWrite 的集合比對，不用單一 literal。
+#    但 regex 要求字面 `settings`，所以 `Edit(~/.claude/**)`、`Edit(~/.claude/*)` 這種 dir glob
+#    同樣重新封鎖 settings.json 卻不含該字面——2026-08-08 apply pass 實測兩者都通過。所以
+#    再加一條 prefix 形式並存：兩者覆蓋互補（regex 抓得到 `Edit(//**/settings.json)`，prefix
+#    形式抓得到 dir glob），合起來嚴格強於任一單獨形式。
+#    regex 的 `([^)]*/)?` 把 `settings` 綁在路徑段開頭，不是 `.*`：後者會把 `appsettings.json`
+#    也算成 settings.json 回歸（`.*` 吃掉 `app`），而 `appsettings.*.json` 就寫在 settings.json
+#    的 autoMode.soft_deny 裡，將來真的加一條那樣的 deny 會被誤紅。PR #25 的 Copilot review
+#    在 suppressed 區抓到這點，實測 appsettings.json／appsettings.Production.json／
+#    localsettings.json 三個誤擋點在收斂後全部解除，六種真回歸拼法仍全數抓到。
+#    **上限，不宣稱閉合**：`Edit(~/**)` 這種更外層的 glob 兩條都漏。glob 的涵蓋關係是語意
+#    關係，任何字串比對都表達不了「這條 pattern 是否仍讓 settings.json 可編輯」。這條斷言
+#    按其本質是 proxy，不是完備判定；真要閉合得靠 PreToolUse(Edit) 攔截實際 diff。
+#    `Write(~/.claude/settings.json)` 依上面第 1 點保留：它擋不住檔案工具，是 Bash classifier
+#    prompt 的輸入而非 gate。那條路的份量來自 unsandboxed retry——2026-08-08 實測佔 Bash
+#    呼叫 38.9%（1308/3359，4.5 天）。重推方式：掃 ~/.claude/projects/*/*.jsonl 的 Bash
+#    tool_use，數 input.dangerouslyDisableSandbox == true 的佔比。該比例隨任務組成大幅波動
+#    （逐日 0%～52%），而規則邏輯不依賴具體數值——非零即足以成立。所以數字只留在這裡，
+#    classifier prose 那邊改成定性敘述，避免一個會腐化的數字釘在 live safety prompt 裡。
 perm_ok=1
 jq -e '
-  (.permissions.deny | index("Edit(~/.claude/settings.json)") != null) and
+  ([.permissions.deny[] | select(test("^Edit\\(([^)]*/)?settings[^/]*\\.json\\s*\\)$"))] | length == 0) and
+  ([.permissions.deny[]
+     | select(startswith("Edit(~/.claude/") or startswith("Edit(/Users/pochientsai/.claude/"))
+     | select(. != "Edit(~/.claude/.github/workflows/**)")] | length == 0) and
   (.permissions.deny | index("Write(~/.claude/settings.json)") != null) and
   (.permissions.deny | index("Edit(~/.claude/.github/workflows/**)") != null) and
   (.permissions.deny | index("Write(~/.claude/.github/workflows/**)") != null) and
   # 上面四條之外，還要釘住這個邊界存在的理由本身：deny 清單一次編輯可以被刪光，而
-  # 只釘 4 條的話刪掉其餘 37 條測試照樣全綠（2026-08-08 mutation 實測）。這裡逐條釘住
-  # 註解點名的三條，並釘總數下限——新增 deny 不該讓測試紅，刪除才該。
+  # 只釘 4 條的話刪掉其餘 37 條測試照樣全綠（2026-08-08 mutation 實測）。
+  # 原本這裡是 `(.permissions.deny | length) >= 48` 釘總數下限。那在寫下它的當時剛好零
+  # slack（清單正好 48 條，刪一條就紅），但同日加了 rm 變體後清單長到 63，下限沒跟著動
+  # → 15 條 slack。mutation 實測：可以刪光整個 secret-read 家族（9 條 Read(...)）或整個
+  # git-destructive 家族（5 條）而測試全綠。改成按家族釘下限——新增不會紅、刪除才會，而且
+  # 不隨清單總長漂移，不必每次加規則就回來調數字（調數字只是重啟同一個跑步機）。
+  # rm 家族 2026-08-08 apply pass 由 17 條收成 6 條，且嚴格更強。三個官方 verbatim 語意：
+  #   1. 官方：`Bash(ls*)`（`*` 前無空格）同時命中 `ls -la` 與 `lsof`，因為沒有 word boundary
+  #      constraint。→ `Bash(rm -*)` 命中所有 `rm -…` 拼法。原本 13 條 flag 排列
+  #      實測仍漏 `rm -rvf`／`rm -rv`／`rm -fv`／單獨的 `rm --recursive`——枚舉形狀本身就錯。
+  #   2. stripped wrappers 明列 shell builtins `command`／`builtin`（以及 timeout/time/nice/
+  #      nohup/stdbuf/noglob 與裸 xargs）→ `Bash(command rm *)` 可證冗餘，已刪；`env` 不在
+  #      該清單，所以 env／絕對路徑那四條是真載重。裸 xargs 被 strip 的副效果是
+  #      `Bash(rm -*)` 連 `xargs rm -rf` 一起蓋到。
+  #   3. 「A rule must match each subcommand independently」，separator 含 && || ; | |& & 與
+  #      newline → 複合指令（`cd /x && rm -rf y`）本來就逐段比對，不是漏洞。
+  # 命令拼法軸補到與上方 launchctl 家族同一組六拼法（原本 regex 把 `(/bin/)?` 放在 env group
+  # 之前，`env /bin/rm`、`/usr/bin/env /bin/rm` 永遠匹配不到，反而接受不存在的 `/bin/env rm`）。
+  # env／絕對路徑那四條刻意是 blanket（不限 -rf），理由同 `Bash(/bin/launchctl *)`：那樣寫 rm
+  # 本身就不尋常，誤擋成本近零。裸 `rm file` 依舊放行，交給 classifier 與 sandbox allowWrite。
+  ([.permissions.deny[] | select(startswith("Read("))] | length >= 9) and
+  ([.permissions.deny[] | select(startswith("Edit(~/"))] | length >= 20) and
+  ([.permissions.deny[] | select(test("^Bash\\((env |/usr/bin/env )?(/bin/)?rm "))] | length >= 6) and
+  ([.permissions.deny[] | select(test("^Bash\\(git (checkout|restore|reset)"))] | length >= 5) and
   (.permissions.deny | index("Read(~/.ssh/**)") != null) and
   (.permissions.deny | index("Bash(sudo *)") != null) and
-  (.permissions.deny | index("Bash(rm -rf *)") != null) and
-  ((.permissions.deny | length) >= 48) and
+  (.permissions.deny | index("Bash(rm -*)") != null) and
+  # 移除 Edit deny 之後，settings.json 邊界的主要載體是 autoMode.hard_deny 那段 prose，而它
+  # 原本零覆蓋——mutation 實測把整個 hard_deny 換成 ["$defaults"] 仍然全綠，正是本區塊
+  # 開頭警告的「一次編輯可以被刪光」。釘住它存在、仍點名 settings.json、且仍帶那條禁令。
+  # 用 >= 1 不用 == 1：== 1 會讓**強化式新增**（再加一條談 settings.json 的 hard_deny）變紅，
+  # 與上面「新增不會紅、刪除才會」自相矛盾（2026-08-08 apply pass 實測）。
+  # anchor 用 `widen a permission` 不用整句、也不用單字 `widen`。三者實測（2026-08-08 apply
+  # pass）：整句對無害改寫（boundary→surface、Never→Do not、少一逗號）報紅；單字 `widen`
+  # 對「拿掉禁令句」仍全綠，因為同段後文的 "widening one" 一樣命中；`widen a permission`
+  # 抓到禁令被移除、且兩種無害改寫都不誤擋。長度不換來強度，鑑別力才換。
+  # 上限：substring anchor 抓不到「保留字面但語意被削弱」。這與 ci.yml 對 guard-git-push
+  # 用判定變數當 anchor 是同一取捨——不用內容 hash，因為 hash 會對任何註解編輯報紅。
+  ([.autoMode.hard_deny[] | select(test("settings\\.json"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(test("widen a permission"))] | length >= 1) and
   # sandbox 這層要連開關一起釘：只釘 denyWrite 的內容而不釘 enabled，把 enabled 改成
   # false 整層失效而測試全綠（同批 mutation 實測）。
   (.sandbox.enabled == true) and
@@ -909,9 +974,9 @@ jq -e '
    | length == 0)
 ' settings.json >/dev/null || perm_ok=0
 if [ "$perm_ok" -eq 1 ]; then
-  ok "~/.claude permission 邊界：settings.json 與 .github/workflows 保持 deny；deny 清單未被削減；sandbox 已啟用且 allowWrite 不含 ~/.claude 或其父層"
+  ok "~/.claude permission 邊界：settings.json 的 Edit deny 依裁決維持移除、Write deny 保留；.github/workflows 兩條保持 deny；deny 清單未被削減；sandbox 已啟用且 allowWrite 不含 ~/.claude 或其父層"
 else
-  bad "~/.claude permission 邊界退化（settings.json／workflows 的 deny、deny 清單規模、sandbox.enabled、或 allowWrite 範圍其中之一）"
+  bad "~/.claude permission 邊界退化（settings.json 的 Edit deny 被加回或 Write deny 被刪、workflows 的 deny、deny 清單規模、sandbox.enabled、或 allowWrite 範圍其中之一）"
 fi
 
 # hooks 內容指紋。移除 Edit(~/.claude/hooks/**) 之後這是唯一的偵測面：CI 只驗形狀
