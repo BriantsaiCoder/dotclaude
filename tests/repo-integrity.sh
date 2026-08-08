@@ -1004,6 +1004,51 @@ else
   fi
 fi
 
+# ── 直接 exec 的 hook 必須保有 exec bit ──────────────────────────────────────────
+#
+# 2026-08-08：上面那道指紋守衛比對的是 `shasum` 的**內容**，看不到 file mode。這是它自稱
+# 涵蓋「內容變更與檔案集合變更」之外的第三個維度，而且是有實害的那一個：
+#   * 註冊時帶 `bash ` 前綴的 hook 不讀 exec bit，翻成 644 無害。
+#   * 沒帶前綴的是直接 exec。翻成 644 就 exec 失敗，而 audit-bash.sh 註冊為 async——
+#     失敗**完全靜默**：Bash audit trail 停止、指紋零差異、測試零差異、使用者零訊號。
+#   * launchctl-readonly.sh 不是 hook 而是 permissions.allow 直接 exec 的路徑，是
+#     CLAUDE.md 指定的唯一 launchctl 查詢管道，同一個曝險面。
+#
+# 從 settings.json 的註冊處推導而非硬編清單：將來任何未加 `bash ` 前綴註冊的 hook 自動
+# 被涵蓋，不必記得回來加名字。比對走 repo 相對路徑（hooks/<basename>）而不是註冊字串裡的
+# ~/.claude/…，因為 CI 的 checkout 不在 $HOME/.claude；git 有保存 100755 所以 CI 驗得到。
+_execbit_missing=""
+_execbit_absent=""
+_execbit_n=0
+_execbit_cmds="$(jq -r '
+  [ (.hooks // {} | to_entries[].value[]?.hooks[]?.command),
+    (.permissions.allow[]? | select(startswith("Bash(~/.claude/hooks/"))
+                           | ltrimstr("Bash(") | rtrimstr(" *)")) ]
+  | .[] | select(. != null and . != "")' settings.json 2>/dev/null)"
+while IFS= read -r _cmd; do
+  [ -n "$_cmd" ] || continue
+  case "$_cmd" in bash\ *|sh\ *|/bin/bash\ *|/bin/sh\ *) continue ;; esac
+  _base="${_cmd%% *}"; _base="${_base##*/}"
+  case "$_base" in *.sh|*.py) ;; *) continue ;; esac
+  _execbit_n=$((_execbit_n + 1))
+  if [ ! -f "hooks/$_base" ]; then
+    _execbit_absent="$_execbit_absent hooks/$_base"
+  elif [ ! -x "hooks/$_base" ]; then
+    _execbit_missing="$_execbit_missing hooks/$_base"
+  fi
+done <<EOF
+$_execbit_cmds
+EOF
+if [ "$_execbit_n" -eq 0 ]; then
+  bad "推導不到任何直接 exec 的 hook——註冊格式可能已變，這道斷言失去依據（不是通過）"
+elif [ -n "$_execbit_absent" ]; then
+  bad "註冊為直接 exec 但檔案不存在：$_execbit_absent"
+elif [ -n "$_execbit_missing" ]; then
+  bad "直接 exec 註冊的 hook 缺 exec bit，會靜默失效（chmod +x 修復）：$_execbit_missing"
+else
+  ok "直接 exec 註冊的 $_execbit_n 支 hook 皆保有 exec bit（清單推導自 settings.json 註冊處）"
+fi
+
 # ~/.claude/.claude/ 對 cwd=~/.claude 的 session 是完整的 settings source（可註冊
 # PreToolUse hook、可加 permissions.allow），而 .gitignore 第 2 行的 `*` 讓 git 與 CI
 # 完全看不見它。這比 hooks/*.sh 威力更大——settings 可以裝 hook。
