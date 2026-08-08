@@ -1024,8 +1024,16 @@ fi
 #     帶前綴的指令第一個 token 是 interpreter，本來就不以 ~/.claude/hooks/ 開頭。
 #   * 只認 ~/.claude/hooks/ 之下的路徑，順帶擋掉 basename 對撞——否則註冊
 #     /opt/tools/audit-bash.sh 會被拿去驗 hooks/audit-bash.sh 的 exec bit 而假 PASS。
-# 已知邊界（不宣稱涵蓋）：註冊在 hooks/ 之外的直接 exec 腳本（例如 ~/.claude/scripts/、
-# ${CLAUDE_PLUGIN_ROOT}/…）不在此斷言範圍內，本區塊只負責本 repo 的 hooks/。
+# 已知邊界（不宣稱涵蓋）：
+#   * 註冊在 hooks/ 之外的直接 exec 腳本（例如 ~/.claude/scripts/、${CLAUDE_PLUGIN_ROOT}/…）
+#     不在此斷言範圍內，本區塊只負責本 repo 的 hooks/。
+#   * **部分** schema 漂移：若將來多出一種註冊形狀（plugin hooks、.hooks[][].hooks[] 旁邊
+#     再多一個 key），舊形狀仍解析得出、_execbit_reg > 0，新形狀則完全隱形而報綠。
+#     下面的 reg==0 只擋得住**全量**漂移。拿同一份 schema 去交叉驗證是循環論證，沒有便宜解。
+# 為什麼不把 mode 併進 tests/hooks.sha256 而是另開一道：git 只保存 x bit（100644/100755），
+# 從 working tree 算出的完整 mode manifest 在本機與 CI 之間不可重現——本 repo 現成三個反例
+# （drift-check.sh 本機 700／git 755，patch-chrome-devtools-mcp.sh 與 patch-playwright-mcp.sh
+# 本機 600／git 644）。只驗 x bit 正好是 git 保證得了的粒度，兩個正交性質分兩道守衛。
 # allow 規則的尾綴用 sub 而非 rtrimstr：rtrimstr 只吃精確後綴，而 `Bash(cmd:*)` 是本檔
 # 現行慣例（Bash(git status:*)、Bash(git add:*)、Bash(git commit:*)），`Bash(cmd)` 也是
 # 合法的無參數寫法——兩者用 rtrimstr(" *)") 都會殘留字元而被靜默丟掉，丟掉的正好是
@@ -1037,8 +1045,13 @@ _execbit_reg=0
 while IFS= read -r _cmd; do
   [ -n "$_cmd" ] || continue
   _execbit_reg=$((_execbit_reg + 1))
+  # 三種拼法都要收：`~/…`、展開後的絕對路徑、以及**字面** `$HOME/…`。第三個用單引號
+  # 防展開——雙引號的 "$HOME/.claude/hooks/"* 在比對前就變成絕對路徑，永遠對不到字面
+  # `$HOME/...` 的註冊。而 jq 那側是放行它的，於是該註冊會計入 _execbit_reg、卻被這裡
+  # 丟掉，湊出 reg>0 且 n==0 → 報「曝險面為零」而實際有未受檢的直接 exec 註冊。
+  # 2026-08-08 apply pass 實測到這個反向誤綠；它與本區塊自稱修掉的是同一形狀。
   case "$_cmd" in
-    "~/.claude/hooks/"*|"$HOME/.claude/hooks/"*) ;;
+    "~/.claude/hooks/"*|"$HOME/.claude/hooks/"*|'$HOME/.claude/hooks/'*) ;;
     *) continue ;;
   esac
   _base="${_cmd%% *}"; _base="${_base##*/}"
