@@ -1034,6 +1034,13 @@ fi
 # 從 working tree 算出的完整 mode manifest 在本機與 CI 之間不可重現——本 repo 現成三個反例
 # （drift-check.sh 本機 700／git 755，patch-chrome-devtools-mcp.sh 與 patch-playwright-mcp.sh
 # 本機 600／git 644）。只驗 x bit 正好是 git 保證得了的粒度，兩個正交性質分兩道守衛。
+# jq 那側對 allow 只做**形狀**篩選（`^Bash\([~/$]`，即「看起來像路徑」），不做 .claude/hooks/
+# 的前綴判定——路徑判定只留在下面的 shell case 一個地方。原本 jq 寫成
+# `^Bash\((~|\$HOME)/\.claude/hooks/`，比 case 窄：絕對路徑寫法 `Bash(/Users/…/hooks/x.sh *)`
+# 被 jq 靜默排除，case 明明收得到卻永遠拿不到它，於是 n 悄悄少一支而仍報 ok。兩個地方各自
+# 判定同一件事就會漂移成這樣（PR #26 Copilot review 實測：絕對路徑 allow 配 644 報 ok、
+# n 由 3 掉到 2）。形狀篩選也不會膨脹 _execbit_reg：現行 allow 只有 launchctl-readonly.sh
+# 這一條以 ~ / / / $ 開頭，其餘（Bash(git status:*)、Bash(jq *)…）都不符合。
 # allow 規則的尾綴用 sub 而非 rtrimstr：rtrimstr 只吃精確後綴，而 `Bash(cmd:*)` 是本檔
 # 現行慣例（Bash(git status:*)、Bash(git add:*)、Bash(git commit:*)），`Bash(cmd)` 也是
 # 合法的無參數寫法——兩者用 rtrimstr(" *)") 都會殘留字元而被靜默丟掉，丟掉的正好是
@@ -1063,7 +1070,7 @@ while IFS= read -r _cmd; do
   fi
 done < <(jq -r '
   [ (.hooks // {} | to_entries[].value[]?.hooks[]?.command),
-    (.permissions.allow[]? | select(test("^Bash\\((~|\\$HOME)/\\.claude/hooks/"))
+    (.permissions.allow[]? | select(test("^Bash\\([~/$]"))
                            | ltrimstr("Bash(") | sub("[ :*)]+$";"")) ]
   | .[] | select(. != null and . != "")' settings.json 2>/dev/null)
 # 三個狀態要分開，不能合成一個 n==0：
