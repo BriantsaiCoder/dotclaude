@@ -920,17 +920,27 @@ jq -e '
   # → 15 條 slack。mutation 實測：可以刪光整個 secret-read 家族（9 條 Read(...)）或整個
   # git-destructive 家族（5 條）而測試全綠。改成按家族釘下限——新增不會紅、刪除才會，而且
   # 不隨清單總長漂移，不必每次加規則就回來調數字（調數字只是重啟同一個跑步機）。
-  # rm 家族的 regex 刻意涵蓋命令拼法軸（env / command / 絕對路徑前置），理由同上方 launchctl
-  # 家族列六種拼法：prefix 規則沒有 flag 分析，命令拼法才是它真正漏的那一軸。其中
-  # `Bash(/bin/rm *)`、`Bash(env rm *)`、`Bash(command rm *)`、`Bash(/usr/bin/env rm *)` 刻意是
-  # blanket（不限 -rf）——絕對路徑或 env 前置寫 rm 本身就不尋常，誤擋成本近零。
+  # rm 家族 2026-08-08 apply pass 由 17 條收成 6 條，且嚴格更強。三個官方 verbatim 語意：
+  #   1. 官方：`Bash(ls*)`（`*` 前無空格）同時命中 `ls -la` 與 `lsof`，因為沒有 word boundary
+  #      constraint。→ `Bash(rm -*)` 命中所有 `rm -…` 拼法。原本 13 條 flag 排列
+  #      實測仍漏 `rm -rvf`／`rm -rv`／`rm -fv`／單獨的 `rm --recursive`——枚舉形狀本身就錯。
+  #   2. stripped wrappers 明列 shell builtins `command`／`builtin`（以及 timeout/time/nice/
+  #      nohup/stdbuf/noglob 與裸 xargs）→ `Bash(command rm *)` 可證冗餘，已刪；`env` 不在
+  #      該清單，所以 env／絕對路徑那四條是真載重。裸 xargs 被 strip 的副效果是
+  #      `Bash(rm -*)` 連 `xargs rm -rf` 一起蓋到。
+  #   3. 「A rule must match each subcommand independently」，separator 含 && || ; | |& & 與
+  #      newline → 複合指令（`cd /x && rm -rf y`）本來就逐段比對，不是漏洞。
+  # 命令拼法軸補到與上方 launchctl 家族同一組六拼法（原本 regex 把 `(/bin/)?` 放在 env group
+  # 之前，`env /bin/rm`、`/usr/bin/env /bin/rm` 永遠匹配不到，反而接受不存在的 `/bin/env rm`）。
+  # env／絕對路徑那四條刻意是 blanket（不限 -rf），理由同 `Bash(/bin/launchctl *)`：那樣寫 rm
+  # 本身就不尋常，誤擋成本近零。裸 `rm file` 依舊放行，交給 classifier 與 sandbox allowWrite。
   ([.permissions.deny[] | select(startswith("Read("))] | length >= 9) and
   ([.permissions.deny[] | select(startswith("Edit(~/"))] | length >= 20) and
-  ([.permissions.deny[] | select(test("^Bash\\((/bin/)?(env |command |/usr/bin/env )?rm "))] | length >= 17) and
+  ([.permissions.deny[] | select(test("^Bash\\((env |/usr/bin/env )?(/bin/)?rm "))] | length >= 6) and
   ([.permissions.deny[] | select(test("^Bash\\(git (checkout|restore|reset)"))] | length >= 5) and
   (.permissions.deny | index("Read(~/.ssh/**)") != null) and
   (.permissions.deny | index("Bash(sudo *)") != null) and
-  (.permissions.deny | index("Bash(rm -rf *)") != null) and
+  (.permissions.deny | index("Bash(rm -*)") != null) and
   # 移除 Edit deny 之後，settings.json 邊界的主要載體是 autoMode.hard_deny 那段 prose，而它
   # 原本零覆蓋——mutation 實測把整個 hard_deny 換成 ["$defaults"] 仍然全綠，正是本區塊
   # 開頭警告的「一次編輯可以被刪光」。釘住它存在、仍點名 settings.json、且仍帶那條禁令。
