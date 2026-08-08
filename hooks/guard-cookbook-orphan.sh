@@ -43,9 +43,10 @@ if [ "$parse_ok" -eq 0 ]; then
     *) exit 0 ;;
   esac
 
-  # 不用 here-doc：macOS 的 bash 3.2 把它的暫存檔開在 cwd 而非 TMPDIR，cwd 唯讀時
-  # redirect 失敗。本檔開了 set -e，於是連 exit 2 都走不到，改以 rc=1 結束——拒絕的
-  # 語意還在，但理由不見了，而 exit code 也不再是契約上的 2。printf 不碰暫存檔。
+  # 不用 here-doc：macOS 的 bash 3.2 把它的暫存檔放在 /tmp（忽略 TMPDIR），/tmp 不可寫
+  # 時才退回 cwd；兩者皆不可寫時 redirect 失敗。本檔開了 set -e，於是連 exit 2 都走不到，
+  # 改以 rc=1 結束——拒絕的語意還在，但理由不見了，exit code 也不再是契約上的 2。
+  # printf 不碰暫存檔。
   printf '%s\n' \
     '[cookbook 守衛] 無法解析 hook payload，無從判斷目標是否在 docs/cookbook/ 下，保守拒絕。' \
     '兩種可能：python3 不可用（確認已安裝且在 PATH 中），或 payload 不是合法 JSON（確認 host 傳入的 stdin 格式）。' >&2

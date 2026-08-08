@@ -325,9 +325,9 @@ SEP=$'\034'
 CMD_SEGMENTS=${SCAN//[\;\|\&]/$SEP}
 CMD_SEGMENTS=${CMD_SEGMENTS//$'\n'/$SEP}
 segments=()
-# 不用 here-string 切段：macOS 的 bash 3.2 把 `<<<` 的暫存檔開在 **cwd** 而非 ${TMPDIR}，
-# cwd 唯讀時 redirect 失敗 → 陣列留空 → 下面找不到 merge 段 → exit 0＝放行。同型缺陷
-# 2026-08-08 在 guard-git-push.sh 實測確認（agents-config #70），此處一併修。
+# 不用 here-string 切段。macOS 的 bash 3.2 把 `<<<` 的暫存檔放在 /tmp（**忽略** TMPDIR），
+# /tmp 不可寫時才退回 cwd；兩者皆不可寫時 redirect 失敗 → 陣列留空 → 下面找不到目標段
+# → exit 0＝放行。同型缺陷 2026-08-08 在 guard-git-push.sh 實測確認（agents-config #70）。
 # 純參數展開沒有暫存檔；本檔已 set -f（檔頭 set -ufo），未加引號的展開不會被 glob。
 saved_ifs=$IFS
 IFS="$SEP"
