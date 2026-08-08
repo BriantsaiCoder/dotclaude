@@ -895,6 +895,11 @@ fi
 #    同樣重新封鎖 settings.json 卻不含該字面——2026-08-08 apply pass 實測兩者都通過。所以
 #    再加一條 prefix 形式並存：兩者覆蓋互補（regex 抓得到 `Edit(//**/settings.json)`，prefix
 #    形式抓得到 dir glob），合起來嚴格強於任一單獨形式。
+#    regex 的 `([^)]*/)?` 把 `settings` 綁在路徑段開頭，不是 `.*`：後者會把 `appsettings.json`
+#    也算成 settings.json 回歸（`.*` 吃掉 `app`），而 `appsettings.*.json` 就寫在 settings.json
+#    的 autoMode.soft_deny 裡，將來真的加一條那樣的 deny 會被誤紅。PR #25 的 Copilot review
+#    在 suppressed 區抓到這點，實測 appsettings.json／appsettings.Production.json／
+#    localsettings.json 三個誤擋點在收斂後全部解除，六種真回歸拼法仍全數抓到。
 #    **上限，不宣稱閉合**：`Edit(~/**)` 這種更外層的 glob 兩條都漏。glob 的涵蓋關係是語意
 #    關係，任何字串比對都表達不了「這條 pattern 是否仍讓 settings.json 可編輯」。這條斷言
 #    按其本質是 proxy，不是完備判定；真要閉合得靠 PreToolUse(Edit) 攔截實際 diff。
@@ -906,7 +911,7 @@ fi
 #    classifier prose 那邊改成定性敘述，避免一個會腐化的數字釘在 live safety prompt 裡。
 perm_ok=1
 jq -e '
-  ([.permissions.deny[] | select(test("^Edit\\(.*settings[^/]*\\.json\\s*\\)$"))] | length == 0) and
+  ([.permissions.deny[] | select(test("^Edit\\(([^)]*/)?settings[^/]*\\.json\\s*\\)$"))] | length == 0) and
   ([.permissions.deny[]
      | select(startswith("Edit(~/.claude/") or startswith("Edit(/Users/pochientsai/.claude/"))
      | select(. != "Edit(~/.claude/.github/workflows/**)")] | length == 0) and
