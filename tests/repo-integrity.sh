@@ -687,9 +687,11 @@ if [ -f hooks/guard-pr-merge.sh ]; then
   fi
 fi
 
-# guard-s5-ledger 同理：它自帶 18 案 selftest（含 SIGPIPE 競態回歸），但註冊上線時沒有
+# guard-s5-ledger 同理：它自帶 selftest（含 SIGPIPE 競態回歸），但註冊上線時沒有
 # 任何東西呼叫它。這支的失效模式是靜默 fail-open——PreToolUse 只有 exit 2 阻擋，任何
 # 意外的 exit 1 都等於放行——沒接線就沒有東西會發現它退化。
+# 不寫案數：這行原本寫「18 案」，之後每加一批就漂一次，光這輪就漂了兩回。案數由
+# `grep -c '^  run_case '` 現查即得，寫進註解只是替未來製造 doc rot。
 if [ -f hooks/guard-s5-ledger.sh ]; then
   if _s5l_out=$(bash hooks/guard-s5-ledger.sh --selftest 2>&1); then
     ok "s5-ledger 守衛 selftest: $(printf '%s' "$_s5l_out" | tail -1)"

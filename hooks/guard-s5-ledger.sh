@@ -85,8 +85,16 @@ if [ "${1:-}" = "--selftest" ]; then
     fi
   }
 
+  # 三欄 + baseline 標題的最小合法區塊。抽成變數而非逐個 fixture 重打：新檢查要求它們同時在場，
+  # 於是每個原本只有兩行狀態的 allow fixture 都得補上——重打四次就會有一次打錯，
+  # 而打錯的方向是 fixture 意外變成 deny 案例，看起來像被測邏輯壞了。
+  record_block='| reviewer 型別 | 一次性 prompt 審查 |
+| agent id | wf_deadbeef |
+| finding 摘要 | 無 actionable findings |
+baseline: Reinvented Stdlib、Wrong Altitude'
+
   good_body="$tmpdir/good.md"
-  printf '## 摘要\n\nS5 Standards: PASS\nS5 Spec: SKIPPED（無 spec 檔）\n' > "$good_body"
+  printf '## 摘要\n\nS5 Standards: PASS\nS5 Spec: SKIPPED（無 spec 檔）\n\n%s\n' "$record_block" > "$good_body"
   bad_body="$tmpdir/bad.md"
   printf '## 摘要\n\n修了一個 bug。\n' > "$bad_body"
   one_axis_body="$tmpdir/one.md"
@@ -97,7 +105,7 @@ if [ "${1:-}" = "--selftest" ]; then
   # SIGPIPE(grep 第一行就命中,printf 還有幾百 KB 沒寫完)→ exit 1 → 靜默放行。
   # 這條是那個競態的回歸測試,不是一般的 happy path。
   big_body="$tmpdir/big.md"
-  printf 'S5 Standards: PASS\nS5 Spec: PASS\n' > "$big_body"
+  printf 'S5 Standards: PASS\nS5 Spec: PASS\n%s\n' "$record_block" > "$big_body"
   awk 'BEGIN { for (i = 0; i < 20000; i++) print "padding line to make the PR body large enough to matter" }' >> "$big_body"
 
   run_case allow '非 PR 指令安靜放行: git status'            'git status'
@@ -105,7 +113,7 @@ if [ "${1:-}" = "--selftest" ]; then
   run_case allow '非建立指令放行: gh pr merge 42 --squash'    'gh pr merge 42 --squash'
   run_case allow '兩軸狀態在 --body-file 內'                  "gh pr create --title t --body-file $good_body"
   run_case allow '兩軸狀態在 --body-file= 形式'               "gh pr create --title t --body-file=$good_body"
-  run_case allow '兩軸狀態直接寫在 --body'                    'gh pr create --title t --body "S5 Standards: PASS / S5 Spec: FAIL"'
+  run_case allow '兩軸狀態直接寫在 --body'                    'gh pr create --title t --body "S5 Standards: PASS / S5 Spec: FAIL / reviewer 型別: 一次性 prompt 審查 / agent id: wf_deadbeef / finding 摘要: 無 actionable findings / baseline: Reinvented Stdlib、Wrong Altitude"'
   run_case deny  'body-file 缺兩軸狀態'                       "gh pr create --title t --body-file $bad_body"
   run_case deny  'body-file 只有 Standards 一軸'              "gh pr create --title t --body-file $one_axis_body"
   run_case deny  '有軸名但無合法狀態值'                       "gh pr create --title t --body-file $no_status_body"
@@ -124,7 +132,8 @@ ate --title t --body "nothing"'
   printf 'S5 Standards: PASSING\nS5 Spec: FAILSAFE\n' > "$prefix_body"
   run_case deny  '狀態值只是合法值的前綴（PASSING／FAILSAFE）' "gh pr create --title t --body-file $prefix_body"
   boundary_body="$tmpdir/boundary.md"
-  printf 'S5 Standards: PASS\nS5 Spec: UNAVAILABLE' > "$boundary_body"
+  # 三欄擺前面：這條測的是「最後一行無換行時狀態值仍靠字串結尾收邊」，狀態行必須留在最後。
+  printf '%s\nS5 Standards: PASS\nS5 Spec: UNAVAILABLE' "$record_block" > "$boundary_body"
   run_case allow '最後一行無換行，狀態值靠字串結尾收邊'        "gh pr create --title t --body-file $boundary_body"
   # 狀態值必須與軸名同一行：[[:space:]] 會吃掉換行，讓下面兩種跨行寫法都算合法。
   crossline_body="$tmpdir/crossline.md"
@@ -133,6 +142,65 @@ ate --title t --body "nothing"'
   splitaxis_body="$tmpdir/splitaxis.md"
   printf 'S5\nStandards: PASS\nS5\nSpec: PASS\n' > "$splitaxis_body"
   run_case deny  '軸名本身被換行切開'                          "gh pr create --title t --body-file $splitaxis_body"
+
+  # ── 三欄 + baseline 標題（reviewer-template.md 的「審查者 MUST 記錄」與「五條 baseline」）。
+  # 上面每個 allow fixture 都已含 record_block，所以它們同時是這組檢查的 GREEN 負控：
+  # 四項齊備時放行。下面補的是各缺一項的 RED，與「不該要求時別要求」的豁免。
+  skipped_body="$tmpdir/skipped.md"
+  printf 'S5 Standards: SKIPPED（低風險 docs）\nS5 Spec: SKIPPED（無 spec 檔）\n' > "$skipped_body"
+  run_case allow '兩軸皆 SKIPPED 免三欄（沒跑審查就沒有記錄）'  "gh pr create --title t --body-file $skipped_body"
+  half_skipped_body="$tmpdir/halfskipped.md"
+  printf 'S5 Standards: PASS\nS5 Spec: SKIPPED（無 spec 檔）\n' > "$half_skipped_body"
+  run_case deny  '只有一軸 SKIPPED，另一軸跑過就要三欄'        "gh pr create --title t --body-file $half_skipped_body"
+  no_fp_body="$tmpdir/nofp.md"
+  printf 'S5 Standards: PASS\nS5 Spec: PASS\n| reviewer 型別 | 一次性 prompt 審查 |\n| agent id | wf_deadbeef |\n| finding 摘要 | 無 |\n' > "$no_fp_body"
+  run_case deny  '三欄齊但缺 baseline 標題（沒讀那一節）'   "gh pr create --title t --body-file $no_fp_body"
+  no_agent_body="$tmpdir/noagent.md"
+  printf 'S5 Standards: PASS\nS5 Spec: PASS\nreviewer 型別：一次性 prompt 審查\nfinding 摘要：無\nbaseline: Reinvented Stdlib、Wrong Altitude\n' > "$no_agent_body"
+  run_case deny  '有 baseline 標題但缺 agent id'                         "gh pr create --title t --body-file $no_agent_body"
+  # 這條釘住 agent id 的 pattern 不得寫成 `agent id|UNAVAILABLE`：那樣的話狀態行自己的
+  # `S5 Standards: UNAVAILABLE` 就滿足了該欄，於是檢查對最需要它的那種 PR 恰好失效。
+  unavail_body="$tmpdir/unavail.md"
+  printf 'S5 Standards: UNAVAILABLE\nS5 Spec: SKIPPED（無 spec 檔）\nreviewer 型別：無\nfinding 摘要：無\nbaseline: Reinvented Stdlib、Wrong Altitude\n' > "$unavail_body"
+  run_case deny  'UNAVAILABLE 不豁免 agent id 欄'              "gh pr create --title t --body-file $unavail_body"
+  unavail_ok_body="$tmpdir/unavailok.md"
+  printf 'S5 Standards: UNAVAILABLE\nS5 Spec: SKIPPED（無 spec 檔）\nreviewer 型別：無\nagent id：UNAVAILABLE（probe: Agent tool 被 host 停用）\nfinding 摘要：無\nbaseline: Reinvented Stdlib、Wrong Altitude\n' > "$unavail_ok_body"
+  run_case allow 'UNAVAILABLE 在 agent id 欄填齊即放行'        "gh pr create --title t --body-file $unavail_ok_body"
+  # agent id 的分隔符變體：只認一個 ASCII 空白會誤擋這三種合法寫法。
+  agent_variant_body="$tmpdir/agentvariant.md"
+  printf 'S5 Standards: PASS\nS5 Spec: PASS\nreviewer 型別：一次性 prompt 審查\nagentId: wf_deadbeef\nfinding 摘要：無\nbaseline: Reinvented Stdlib、Wrong Altitude\n' > "$agent_variant_body"
+  run_case allow 'agent id 寫成 agentId 不誤擋'                "gh pr create --title t --body-file $agent_variant_body"
+
+  # ── 豁免的極性。前三條全是 S5 實測到的**放行**，不是假想：`=~` 在多行字串上是任意位置
+  # 匹配，所以「body 某處長得像 SKIPPED 狀態行」曾等同於「兩軸都是 SKIPPED」。
+  fake_skip_body="$tmpdir/fakeskip.md"
+  printf 'S5 Standards: PASS\nS5 Spec: PASS\n\n散文提到 S5 Standards: SKIPPED 與 S5 Spec: SKIPPED 這兩種寫法。\n' > "$fake_skip_body"
+  run_case deny  '真狀態 PASS，散文含 SKIPPED 形狀不得豁免'    "gh pr create --title t --body-file $fake_skip_body"
+  fail_skip_body="$tmpdir/failskip.md"
+  printf 'S5 Standards: FAIL\nS5 Spec: FAIL\n\n散文提到 S5 Standards: SKIPPED 與 S5 Spec: SKIPPED 這兩種寫法。\n' > "$fail_skip_body"
+  run_case deny  '兩軸皆 FAIL，散文含 SKIPPED 形狀不得豁免'    "gh pr create --title t --body-file $fail_skip_body"
+  # 這條釘死 deny 文案不得自己交出答案：把本 hook 的 deny 訊息整段貼回 body 是被擋者最自然
+  # 的反應，訊息若列出五條標題就等於四項全被自己餵滿。S5 實測前一版（印指紋值）在此 ALLOW。
+  echoed_deny_body="$tmpdir/echoeddeny.md"
+  printf 'S5 Standards: PASS\nS5 Spec: PASS\n\n[S5-1] 兩軸狀態齊了，但 PR body 缺 reviewer 型別、agent id、finding 摘要、over-engineering baseline 五條中至少兩條的逐字標題。這裡不列出五條是什麼——去讀 reviewer-template.md 的「五條 baseline」那一節。\n' > "$echoed_deny_body"
+  run_case deny  '把 deny 訊息貼回 body 不得放行'              "gh pr create --title t --body-file $echoed_deny_body"
+  # 「至少兩條」的邊界：單一標題（尤其 Wrong Altitude）可能在無關討論裡自然出現。
+  one_title_body="$tmpdir/onetitle.md"
+  printf 'S5 Standards: PASS\nS5 Spec: PASS\nreviewer 型別：一次性 prompt 審查\nagent id: wf_deadbeef\nfinding 摘要：無\n這裡討論了 Wrong Altitude 這個概念。\n' > "$one_title_body"
+  run_case deny  '只有一條 baseline 標題不算數'                "gh pr create --title t --body-file $one_title_body"
+  # 五條中任意兩條都成立，不是只認 record_block 裡那一組。
+  other_pair_body="$tmpdir/otherpair.md"
+  printf 'S5 Standards: PASS\nS5 Spec: PASS\nreviewer 型別：一次性 prompt 審查\nagent id: wf_deadbeef\nfinding 摘要：無\n命中 Needless Indirection 與 Unused Local Reuse 兩條。\n' > "$other_pair_body"
+  run_case allow '五條中任兩條皆成立（非只認固定一組）'        "gh pr create --title t --body-file $other_pair_body"
+  # reviewer／finding 兩條檢查原本零覆蓋：把三欄檢查全部短路後只有 agent id 的 case 翻紅
+  # （S5 突變測試實證）。程式是對的，但它們可以被改壞而 selftest 全綠——正是本檔 :55-63
+  # 記載那個形態的近親。
+  no_reviewer_body="$tmpdir/noreviewer.md"
+  printf 'S5 Standards: PASS\nS5 Spec: PASS\nagent id: wf_deadbeef\nfinding 摘要：無\nbaseline: Reinvented Stdlib、Wrong Altitude\n' > "$no_reviewer_body"
+  run_case deny  '缺 reviewer 型別'                            "gh pr create --title t --body-file $no_reviewer_body"
+  no_finding_body="$tmpdir/nofinding.md"
+  printf 'S5 Standards: PASS\nS5 Spec: PASS\nreviewer 型別：一次性 prompt 審查\nagent id: wf_deadbeef\nbaseline: Reinvented Stdlib、Wrong Altitude\n' > "$no_finding_body"
+  run_case deny  '缺 finding 摘要'                             "gh pr create --title t --body-file $no_finding_body"
 
   printf '\n'
   if [ "$fails" -eq 0 ]; then
@@ -261,9 +329,110 @@ missing=""
 [[ "$BODY" =~ S5[[:blank:]]+Spec:[[:blank:]]*$STATUS_RE([^A-Za-z0-9_]|$) ]] ||
   missing="${missing:+$missing 與 }S5 Spec"
 
-[ -z "$missing" ] && exit 0
-
-deny "[S5-1] PR body 缺 $missing 狀態行。進 PR 的變更 MUST 跑 Standards 與 Spec 兩軸，各標 PASS／FAIL／SKIPPED（附理由）／UNAVAILABLE（附 probe）。請在 PR body 加入例如：
-  S5 Standards: PASS
+if [ -n "$missing" ]; then
+  # 範例刻意兩行都用 SKIPPED：被擋的人常把這段訊息貼進 body 當說明，而範例若寫
+  # `S5 Standards: PASS`，一個真正兩軸 SKIPPED 的 docs PR 就會因為 body 裡出現那個形狀
+  # 而失去下方的豁免，接著被要求它誠實填不出來的三欄——兩則 deny 訊息互相打架（S5 實測）。
+  deny "[S5-1] PR body 缺 $missing 狀態行。進 PR 的變更 MUST 跑 Standards 與 Spec 兩軸，各標 PASS／FAIL／SKIPPED（附理由）／UNAVAILABLE（附 probe）。請在 PR body 加入例如：
+  S5 Standards: SKIPPED（低風險 docs，未跑審查）
   S5 Spec: SKIPPED（無 spec 檔）
 缺 reviewer capability 時填 UNAVAILABLE 並附 probe 指令與失敗理由，不得以自審頂替（見 ~/.agents/skills/dev-workflow/references/reviewer-template.md）。"
+fi
+
+# ── 兩行狀態擋得住「沒宣告」，擋不住「宣告了但沒依據」。
+#
+# 2026-08-09 的失效：PR #99／#100 的 body 都寫了「全數套用 reviewer-template.md 的 canonical
+# over-engineering contract」，而該檔從未被載入；同一輪還漏掉該檔 :69-79 的三欄 MUST 記錄，
+# 只給分組統計。上面的兩軸檢查對這兩件事全無感覺——`S5 Standards: PASS` 照樣通過。
+#
+# 四項的強度**不相等**，這裡明寫免得誤以為都是硬證據：
+#   * baseline 標題最強，但也只是「真的讀到 reviewer-template.md 的那一節」。它**不是**
+#     證明——決心造假的人照樣抄得到兩個詞。
+#     這一項換過三版才定案，前三版都是「在該檔放一個識別碼、要求 ledger 引用它」，
+#     S5 三輪各打掉一次：值被複印進消費端 → 兄弟指紋可代換 → 引入它的 commit message
+#     自己寫出了值。根因是識別碼與「讀過那一節」之間沒有必然關係，每堵一條旁路就長出
+#     下一條。改驗 contract 內容之後這整類問題消失：標題外流等於 contract 外流，正是
+#     要的結果，所以沒有洩漏面、不必輪替、deny 訊息也可以直說要什麼。
+#   * 三欄只是關鍵詞在場檢查。寫「reviewer 型別：無」照樣過；三個詞散落在不相干散文
+#     （「呼叫 reviewer service，用 agent id 當 cache key，寫入 finding 表」）也照樣過，
+#     S5 實測。它擋的是「只有兩行狀態、其餘什麼都沒有」的空洞 body，不是刻意造假。
+#     刻意造假由 review 本身承擔，不是 hook。
+# 用寬鬆關鍵詞而非逐字欄名，是為了不誤擋 ledgers.md 範例那種散文寫法
+# （`reviewer=dotnet-code-reviewer（agent id dcr-07）；2 findings 皆採納並修`）——
+# 誤擋會逼人把 body 改成迎合 hook 的形狀，那比漏擋更糟。
+#
+# 豁免：兩軸皆 SKIPPED = 完全沒跑審查（[S5-1] 允許低風險 docs／trivial change 這樣標），
+# 三欄與指紋無從產生。只要有一軸真的跑過就要求——**UNAVAILABLE 算跑過**：
+# reviewer-template.md 明寫無審查者時是在 agent id 欄填 UNAVAILABLE 並附 probe，
+# 那仍是三欄的一部分，不是三欄的豁免。
+#
+# 第三個條件（沒有任何非 SKIPPED 狀態值）不是保險，是這個豁免唯一能成立的理由。
+# bash 的 `=~` 在多行字串上是「任意位置匹配」，前兩個條件因此只證明 body 的**某處**
+# 長得像 `S5 Standards: SKIPPED`，不是真正的狀態行就是它。S5 實測到兩種放行：
+#   * 狀態 PASS/PASS，散文裡引用了兩個 SKIPPED 形狀 → 整段豁免（本 PR 自己的 body
+#     只要描述 skipped_body fixture 就命中）。
+#   * 兩軸皆 **FAIL**，散文同上 → 零記錄放行。
+# 這是本檔第一條由 body 內容驅動的 early exit 0，而 exit 0 對 PreToolUse 就是放行，
+# 所以它必須比其他判定更嚴，不是更鬆。
+# 前兩個條件在目前排序下是 documentation 不是判定：上方的 `missing` gate 已保證兩軸各
+# 跟著一個合法狀態值，第三個條件又排除掉 PASS/FAIL/UNAVAILABLE，於是那個值只能是 SKIPPED。
+# 實證：把條件一改成 `true`，selftest 仍全過。留著是因為它們寫明了「兩軸皆 SKIPPED」這個
+# 意圖，而且一旦有人把本區塊移到 `missing` 的 deny 之前，它們立刻變成活判定。
+#
+# 修法的覆蓋範圍要說準（前一版註解宣稱過寬）：第三個條件只關掉「真狀態是 PASS/FAIL/
+# UNAVAILABLE，而散文另外提到 SKIPPED 形狀」那一半。body **完全沒有真狀態行**、只靠散文
+# 滿足上方 gate 時，豁免仍會成立——那是 gate 1 本身可被散文滿足的既有性質，不是本區塊
+# 引入的，修它要改的是 gate 1 的比對方式。
+if [[ "$BODY" =~ S5[[:blank:]]+Standards:[[:blank:]]*SKIPPED([^A-Za-z0-9_]|$) ]] &&
+   [[ "$BODY" =~ S5[[:blank:]]+Spec:[[:blank:]]*SKIPPED([^A-Za-z0-9_]|$) ]] &&
+   ! [[ "$BODY" =~ S5[[:blank:]]+(Standards|Spec):[[:blank:]]*(PASS|FAIL|UNAVAILABLE)([^A-Za-z0-9_]|$) ]]; then
+  exit 0
+fi
+
+# agent id 用逐字欄名而非 `|UNAVAILABLE` alternation：後者會被狀態行自己的
+# `S5 Standards: UNAVAILABLE` 滿足，於是這條檢查對最需要它的那種 PR 恰好失效。
+# 分隔符收寬到 `[[:blank:]_-]*`：`agent_id`／`agent-id`／`agentId` 都是合法寫法，
+# 只認一個 ASCII 空白會誤擋它們——這條檢查的攔截力本來就低，再拿它製造誤擋不划算。
+#
+# 已知不足（S5 實測，不修）：inline `--body` 時 BODY 是整條 command（見上方 `BODY="$CMD"`），
+# 於是 `--title`／`--label` 的值也能滿足這四項。--body-file 路徑沒有這個問題（只讀檔案內容，
+# 理由見該處註解）。不修的理由是可靠的修法要解析 shell 引號，而本檔開宗明義拒絕解析 shell
+# 語法——那會開出新的規避路徑，比這個洞更糟。實務上寫得下完整 ledger 的 PR 都用 --body-file。
+#
+# 同一個洞有嚴重一級的形態，一併記著：`--title 'S5 Standards: SKIPPED / S5 Spec: SKIPPED'`
+# 配 inline body 會**觸發上方的豁免**而不只是「餵滿四項」——豁免是 early exit 0，四項一項
+# 都不會查（S5 實測 ALLOW，`--label` 同）。
+#
+# 另有兩個本檔管不到的相鄰破口，記為已知、不在本次範圍：
+#   * 五條 baseline 標題就寫在下面的迴圈裡，所以把本檔這一段貼進 PR body 即可通過檢查
+#     （S5 實測）。design note 說「標題外流等於 contract 外流」對 reviewer-template.md 與
+#     ledgers.md 成立——那裡標題連同定義一起帶走；對這個裸字串清單不成立。命中的正是
+#     「改這支 hook 並把 diff 貼進 body」那種 PR。改讀 reviewer-template.md 可以堵，但會
+#     把剛擺脫的跨 repo 執行期依賴請回來，不划算。
+#   * `gh pr edit --body-file` 完全不受任何 guard 管（matcher 只認 `gh pr create`），
+#     合規開 PR 後換掉 body 即全繞過。判定邏輯可共用，擴 matcher 是獨立的一次改動。
+record=""
+[[ "$BODY" =~ [Rr]eviewer ]] || record="reviewer 型別"
+[[ "$BODY" =~ [Aa]gent[[:blank:]_-]*[Ii][Dd] ]] || record="${record:+${record}、}agent id"
+[[ "$BODY" =~ [Ff]inding ]] || record="${record:+${record}、}finding 摘要"
+
+# baseline 標題用字面比對（`case` 而非 `=~`）：標題含空白，當成 regex 沒有好處只有踩到
+# metachar 的風險。要求兩條而不是一條——單一標題（尤其 `Wrong Altitude`）較可能在無關
+# 討論裡出現，兩條同時出現則幾乎只可能來自那一節。
+baseline_hits=0
+for _title in 'Reinvented Stdlib' 'Redundant Dependency' 'Unused Local Reuse' 'Needless Indirection' 'Wrong Altitude'; do
+  case "$BODY" in
+    *"$_title"*) baseline_hits=$((baseline_hits + 1)) ;;
+  esac
+done
+[ "$baseline_hits" -ge 2 ] || record="${record:+${record}、}over-engineering baseline 五條中至少兩條的逐字標題"
+
+[ -z "$record" ] && exit 0
+
+# 三欄的名稱逐字列出、baseline 五條刻意不列，這個不對稱是有意的：三欄名稱在 ledger 定義裡
+# 本來就寫著，藏它只會讓被擋的人不知道要補什麼；baseline 標題本身就是那一項要驗的證據，
+# 列出來等於這道檢查自己交出答案（S5 實測前一版印指紋值時即被貼回 body 繞過）。
+deny "[S5-1] 兩軸狀態齊了，但 PR body 缺 ${record}。至少一軸非 SKIPPED＝審查真的跑過，reviewer-template.md「審查者 MUST 記錄」要求三欄，缺一不得判 S5 PASS：
+  reviewer 型別／agent id（無審查者時此欄填 UNAVAILABLE + probe 指令與失敗理由）／finding 逐條摘要
+另需逐字引用該檔 over-engineering baseline 五條中至少兩條的標題（同一行內、大小寫相符），證明那一節真的被讀到。這裡不列出五條是什麼——去讀 ~/.agents/skills/dev-workflow/references/reviewer-template.md 的 reviewer prompt 區塊裡「house over-engineering baseline 五條」那份清單，讀了自然引得出。
+兩軸皆 SKIPPED（低風險且沒跑審查）時本檢查不適用。"
