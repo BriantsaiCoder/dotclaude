@@ -55,7 +55,7 @@ paths:
 
 .NET Framework 專案的三個差異：
 
-- **BCL 可攜性可以機械化**——`<TargetFrameworks>net8.0;net4x</TargetFrameworks>` + `Microsoft.NETFramework.ReferenceAssemblies`（`PrivateAssets="all"`，不進輸出），用到目標版本沒有的 API 就編譯失敗。`net4x` 取專案實際要搬進去的版本（新建專案的預設見 `dotnet.md`）；寫確切 moniker，不要寫超集（`net46` ≠ `net462`）。三個代價：多目標後 `dotnet run` 需要 `-f <tfm>`，而**加了 `-f` 就跳過 gate**（只會朝更綠偏，不會表現成紅燈）；目標為已停止支援的版本時新版 Visual Studio 載不進該 `.csproj`；首次 restore 需連 nuget.org。
+- **BCL 可攜性可以機械化**——`<TargetFrameworks>net8.0;net48</TargetFrameworks>` + `Microsoft.NETFramework.ReferenceAssemblies`（`PrivateAssets="all"`，`Condition` 限定該 TFM，不進輸出也不污染另一個 target 的相依），用到目標版本沒有的 API 就編譯失敗。第二個 moniker 換成專案實際要搬進去的版本（`net48` 只是範例，新建專案的預設見 `dotnet.md`）；寫確切 moniker，不要寫超集（`net46` ≠ `net462`）。三個代價：多目標後 `dotnet run` 需要 `-f <tfm>`，而**加了 `-f` 就跳過 gate**（只會朝更綠偏，不會表現成紅燈）；目標為已停止支援的版本時新版 Visual Studio 載不進該 `.csproj`；首次 restore 需連 nuget.org。
 - **`packages.config` 專案上 audit 本身仍會出 warning，但把它變成 gate 是 `UNAVAILABLE`**：MSBuild 的訊息嚴重度屬性（`NoWarn`／`TreatWarningsAsErrors`）不支援該專案格式。先遷 `PackageReference`，否則標 `UNAVAILABLE` 附 probe。
 - **Stryker 在 .NET Framework 上需要 nuget.exe 在 PATH 與 VS 的 NuGet targets/build tasks**（文件未明言平台限制，實務上推測 Windows-only）。若 build target 是 net8.0、4.x 只是源碼層約束，直接對 net8.0 那個 target 跑即可。`<LangVersion>6</LangVersion>` 對應 `stryker-config.json` 的 `"language-version": "Csharp6"`（文件已列為合法值；只能寫 config 檔，無 CLI 旗標）。
 
