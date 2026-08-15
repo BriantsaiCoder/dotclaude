@@ -40,14 +40,14 @@ paths:
 | Tests | `dotnet test -c Release` | ✅ | — |
 | Compile | `dotnet build -c Release -warnaserror` | ✅ | 註 1 |
 | Format | `dotnet format --verify-no-changes --severity warn` | ✅ | 文件 |
-| Coverage | `dotnet test -p:CollectCoverage=true -p:Threshold=<n> -p:ThresholdType=line,branch`（**coverlet.msbuild**） | ✅ | 文件 |
+| Coverage | `dotnet test -p:CollectCoverage=true -p:CoverletOutputFormat=cobertura -p:Threshold=<n> -p:ThresholdType=line,branch`（**coverlet.msbuild**） | ✅ | 文件 |
 | Coverage | `dotnet test --collect:"XPlat Code Coverage"`（**coverlet.collector**） | ❌ 不做 threshold validation | 文件 |
-| Changed-line coverage | `diff-cover coverage.cobertura.xml --compare-branch=origin/main --fail-under=<n>`（Python 工具，需 pip） | ✅ | 文件 |
+| Changed-line coverage | `diff-cover coverage.cobertura.xml --compare-branch=origin/main --fail-under=<n>`（Python 工具，需 pip；XML 由上一列的 `CoverletOutputFormat=cobertura` 產出，collector 則落在 `TestResults/**/coverage.cobertura.xml`） | ✅ | 文件 |
 | Mutation | `dotnet stryker --since:main --break-at <n>`（於測試專案目錄） | ✅ 少了 `--break-at` 只是報表 | 文件 |
 | Property-based | `CsCheck`（無框架綁定）或 `FsCheck.Xunit` 的 `[Property]`，隨 `dotnet test` 跑 | ✅ | 文件 |
 | 依賴弱點 | `Directory.Build.props` 設 `<NuGetAuditMode>all</NuGetAuditMode>` + `<WarningsAsErrors>$(WarningsAsErrors);NU1903;NU1904</WarningsAsErrors>` → `dotnet restore` | ✅ | 實跑 exit 1 |
 | 依賴弱點 | `dotnet list package --vulnerable --include-transitive` | ❌ 印出 High／Critical 仍 exit 0 | 實跑 exit 0 |
-| Secrets | 依 dev-workflow 的 `references/dirty-review-package.md`（三段掃描 + 三類 exit code），不要只跑 `gitleaks git --staged` | ✅ | — |
+| Secrets | 依 `~/.agents/skills/dev-workflow/references/dirty-review-package.md`（三段掃描 + 三類 exit code），不要只跑 `gitleaks git --staged` | ✅ | — |
 
 註 1：`-warnaserror` 是 MSBuild switch，提升的是所有 MSBuild-logged warning（含 NuGet 的 `NU` 碼），與編譯器層的 `<TreatWarningsAsErrors>`（可用 `NoWarn`／`WarningsNotAsErrors` 細調）語意不同。要的是型別 gate 就用後者，否則一個無關的 `NU1701` 會讓 build 紅。
 
