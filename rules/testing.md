@@ -13,7 +13,7 @@ paths:
   - "**/e2e/**"
   - "**/*.csproj"
   - "**/Directory.Build.props"
-  - "**/.github/workflows/*.y*ml"
+  - "**/.github/workflows/*.{yml,yaml}"
 ---
 
 # Testing 行為錨
