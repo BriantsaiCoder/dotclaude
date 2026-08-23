@@ -317,7 +317,11 @@
       "denyWrite": [
         "~/.claude/CLAUDE.md",
         "~/.claude/settings.json",
-        "~/.claude/hooks"
+        "~/.claude/hooks",
+        "~/.claude/core",
+        "~/.agents/bin",
+        "~/.agents/hooks",
+        "~/.agents/skills/dev-workflow"
       ]
     },
     "credentials": {
@@ -336,6 +340,10 @@
         },
         {
           "path": "~/.netrc",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.claude/.credentials.json",
           "mode": "deny"
         }
       ]
@@ -357,21 +365,21 @@
   "autoMode": {
     "allow": [
       "$defaults",
-      "dotnet build/test/run/watch/restore, dotnet ef migrations add (not drop or remove applied migrations; dotnet ef database update and dotnet ef database drop are outside this entry, including dotnet ef database update 0)",
+      "dotnet build/test/run/watch/restore, dotnet ef migrations add (not remove applied migrations; dotnet ef database update and dotnet ef database drop are outside this entry)",
       "npm/pnpm/yarn install/ci/run/test/build, npx <tool>, vitest, playwright test",
       "docker compose up/down/build/logs/ps, docker run/exec/logs on local containers",
-      "git status/diff/log/show/add/commit/branch (no -D)/checkout <branch>/pull/fetch/stash push; git push (non-force); git push --force-with-lease (never to main or master, which hooks/guard-git-push.sh also blocks mechanically)",
-      "Local Operations extension: ~/.claude (github.com/BriantsaiCoder/dotclaude) and ~/.agents (github.com/BriantsaiCoder/agents-config) are the user's own repositories and are in project scope for this user — reading, editing, git status/diff/log/add/commit/branch/pull, and pushing to a feature branch in either is a Local Operation, not scope escalation. Three carve-outs, each an exclusion from this entry and nothing else. (a) Reading ~/.claude/.credentials.json is never covered, by any reader — Read tool, cat/less/more/head/tail/bat/xxd/od/base64, or piping it anywhere — because it holds the account OAuth token; permissions.deny Read(~/.claude/.credentials.json) gates the Read-tool path, and the $defaults Standard Credentials allow rule does not extend to it either. (b) Editing ~/.claude/hooks/, agents/, skills/, commands/, or .mcp.json is never covered: these are the $defaults Self-Modification surfaces, and the built-in .claude protected-path check gates them, with hooks/ additionally covered by sandbox denyWrite and the tests/hooks.sha256 fingerprint. (c) \"Feature branch\" means any branch other than main or master, and \"pushing\" means pushing to that repository's own origin — pushing either repo's content to any other remote, or to main or master, is never covered by this entry."
+      "git status/diff/log/show/add/commit/branch (no -D)/checkout <branch>/pull/fetch/stash push; git push (non-force); git push --force-with-lease <remote> <branch>",
+      "Local Operations extension: ~/.claude (github.com/BriantsaiCoder/dotclaude) and ~/.agents (github.com/BriantsaiCoder/agents-config) are the user's own repositories and are in project scope for this user — reading, editing, git status/diff/log/add/commit/branch/pull, and pushing to a feature branch in either is a Local Operation, not scope escalation. This entry does not extend to: editing any $defaults Self-Modification config surface in either repo (that rule's own list governs, and ~/.claude/core/, ~/.agents/bin/, and ~/.agents/skills/ are equivalent startup-loaded config for this purpose); reading ~/.claude/.credentials.json; or pushing to a remote other than that repository's own origin. It adds no branch definition — \"feature branch\" stays whatever the $defaults Git Push Destination rule already treats it as."
     ],
     "soft_deny": [
       "$defaults",
-      "Reading or exfiltrating secret files (.env*, appsettings.*.json, *.pem/*.key/*.pfx, ~/.ssh/id_*, ~/.aws/credentials, .npmrc, .netrc) via any reader (cat/less/more/head/tail/bat/xxd/od/hexdump/base64/openssl) or piping them into network tools (curl/nc/scp/rsync).",
+      "Reading or exfiltrating secret files (.env*, appsettings.*.json, *.pem/*.key/*.pfx, ~/.ssh/id_*, ~/.aws/credentials, ~/.claude/.credentials.json, .npmrc, .netrc) via any reader (cat/less/more/head/tail/bat/xxd/od/hexdump/base64/openssl) or piping them into network tools (curl/nc/scp/rsync).",
       "Destructive SQL via any SQL client (CLI, GUI, ORM raw-SQL, or an app's own migration runner): DROP DATABASE/TABLE/SCHEMA, TRUNCATE, or DELETE/UPDATE without a narrow predicate.",
       "Destructive NoSQL: mongosh drop/dropDatabase, redis-cli FLUSHDB/FLUSHALL, DETACH DATABASE.",
       "Publishing to external registries: npm/yarn/pnpm publish, dotnet nuget push, cargo publish, gem push, twine upload, docker/helm push to public registries.",
       "Modifying local trust or secret stores: dotnet user-secrets set/clear, dotnet dev-certs, security add-trusted-cert, keychain writes, update-ca-certificates.",
       "Silently discarding uncommitted work: git checkout . / -- <path>, git restore . / --source, git reflog expire, git stash drop/clear.",
-      "Database or migration destruction: dotnet ef database drop, dotnet ef migrations remove with -f/--force, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
+      "Database or migration destruction: dotnet ef database drop, dotnet ef database update to an earlier migration or to 0 (a rollback, not an upgrade), dotnet ef migrations remove with -f/--force, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
     ],
     "hard_deny": [
       "$defaults",
