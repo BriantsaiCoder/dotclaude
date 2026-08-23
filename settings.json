@@ -365,12 +365,12 @@
     "soft_deny": [
       "$defaults",
       "Reading or exfiltrating secret files (.env*, appsettings.*.json, *.pem/*.key/*.pfx, ~/.ssh/id_*, ~/.aws/credentials, .npmrc, .netrc) via any reader (cat/less/more/head/tail/bat/xxd/od/hexdump/base64/openssl) or piping them into network tools (curl/nc/scp/rsync).",
-      "Destructive SQL through psql/mysql/mariadb/sqlcmd: DROP DATABASE/TABLE/SCHEMA, TRUNCATE, or unqualified DELETE/UPDATE.",
+      "Destructive SQL via any SQL client (CLI, GUI, ORM raw-SQL, or an app's own migration runner): DROP DATABASE/TABLE/SCHEMA, TRUNCATE, or DELETE/UPDATE without a narrow predicate.",
       "Destructive NoSQL: mongosh drop/dropDatabase, redis-cli FLUSHDB/FLUSHALL, DETACH DATABASE.",
       "Publishing to external registries: npm/yarn/pnpm publish, dotnet nuget push, cargo publish, gem push, twine upload, docker/helm push to public registries.",
       "Modifying local trust or secret stores: dotnet user-secrets set/clear, dotnet dev-certs, security add-trusted-cert, keychain writes, update-ca-certificates.",
       "Silently discarding uncommitted work: git checkout . / -- <path>, git restore . / --source, git reflog expire, git stash drop/clear.",
-      "Database or migration destruction: dotnet ef database drop, ef migrations remove after apply, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
+      "Database or migration destruction: dotnet ef database drop, dotnet ef migrations remove with -f/--force, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
     ],
     "hard_deny": [
       "$defaults",
