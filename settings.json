@@ -49,6 +49,7 @@
       "Read(~/.aws/**)",
       "Read(~/.gnupg/**)",
       "Read(~/.netrc)",
+      "Read(~/.claude/.credentials.json)",
       "Edit(~/Documents/**)",
       "Edit(~/Desktop/**)",
       "Edit(~/Pictures/**)",
@@ -356,11 +357,11 @@
   "autoMode": {
     "allow": [
       "$defaults",
-      "dotnet build/test/run/watch/restore, dotnet ef migrations add/update (not drop or remove applied migrations)",
+      "dotnet build/test/run/watch/restore, dotnet ef migrations add (not drop or remove applied migrations; dotnet ef database update and dotnet ef database drop are outside this entry, including dotnet ef database update 0)",
       "npm/pnpm/yarn install/ci/run/test/build, npx <tool>, vitest, playwright test",
       "docker compose up/down/build/logs/ps, docker run/exec/logs on local containers",
-      "git status/diff/log/show/add/commit/branch (no -D)/checkout <branch>/pull/fetch/stash push/push (non-force)/push --force-with-lease",
-      "Local Operations extension: ~/.claude (github.com/BriantsaiCoder/dotclaude) and ~/.agents (github.com/BriantsaiCoder/agents-config) are the user's own repositories and are in project scope for this user — reading, editing, git status/diff/log/add/commit/branch/pull, and pushing to a feature branch in either is a Local Operation, not scope escalation."
+      "git status/diff/log/show/add/commit/branch (no -D)/checkout <branch>/pull/fetch/stash push; git push (non-force); git push --force-with-lease (never to main or master, which hooks/guard-git-push.sh also blocks mechanically)",
+      "Local Operations extension: ~/.claude (github.com/BriantsaiCoder/dotclaude) and ~/.agents (github.com/BriantsaiCoder/agents-config) are the user's own repositories and are in project scope for this user — reading, editing, git status/diff/log/add/commit/branch/pull, and pushing to a feature branch in either is a Local Operation, not scope escalation. Three carve-outs, each an exclusion from this entry and nothing else. (a) Reading ~/.claude/.credentials.json is never covered, by any reader — Read tool, cat/less/more/head/tail/bat/xxd/od/base64, or piping it anywhere — because it holds the account OAuth token; permissions.deny Read(~/.claude/.credentials.json) gates the Read-tool path, and the $defaults Standard Credentials allow rule does not extend to it either. (b) Editing ~/.claude/hooks/, agents/, skills/, commands/, or .mcp.json is never covered: these are the $defaults Self-Modification surfaces, and the built-in .claude protected-path check gates them, with hooks/ additionally covered by sandbox denyWrite and the tests/hooks.sha256 fingerprint. (c) \"Feature branch\" means any branch other than main or master, and \"pushing\" means pushing to that repository's own origin — pushing either repo's content to any other remote, or to main or master, is never covered by this entry."
     ],
     "soft_deny": [
       "$defaults",
