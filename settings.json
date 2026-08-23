@@ -2,6 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "cleanupPeriodDays": 30,
   "env": {
+    "AUTOMODE_DECISION_LOG": "1",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000",
     "DOTNET_CLI_HOME": "/Users/pochientsai/.dotnet",
     "DOTNET_SYSTEM_NET_DISABLEIPV6": "1"
@@ -358,23 +359,24 @@
       "dotnet build/test/run/watch/restore, dotnet ef migrations add/update (not drop or remove applied migrations)",
       "npm/pnpm/yarn install/ci/run/test/build, npx <tool>, vitest, playwright test",
       "docker compose up/down/build/logs/ps, docker run/exec/logs on local containers",
-      "git status/diff/log/show/add/commit/branch (no -D)/checkout <branch>/pull/fetch/stash push/push (non-force)/push --force-with-lease"
+      "git status/diff/log/show/add/commit/branch (no -D)/checkout <branch>/pull/fetch/stash push/push (non-force)/push --force-with-lease",
+      "Local Operations extension: ~/.claude (github.com/BriantsaiCoder/dotclaude) and ~/.agents (github.com/BriantsaiCoder/agents-config) are the user's own repositories and are in project scope for this user — reading, editing, git status/diff/log/add/commit/branch/pull, and pushing to a feature branch in either is a Local Operation, not scope escalation."
     ],
     "soft_deny": [
       "$defaults",
       "Reading or exfiltrating secret files (.env*, appsettings.*.json, *.pem/*.key/*.pfx, ~/.ssh/id_*, ~/.aws/credentials, .npmrc, .netrc) via any reader (cat/less/more/head/tail/bat/xxd/od/hexdump/base64/openssl) or piping them into network tools (curl/nc/scp/rsync).",
-      "Destructive SQL through psql/mysql/mariadb/sqlcmd: DROP DATABASE/TABLE/SCHEMA, TRUNCATE, or unqualified DELETE/UPDATE.",
+      "Destructive SQL via any SQL client (CLI, GUI, ORM raw-SQL, or an app's own migration runner): DROP DATABASE/TABLE/SCHEMA, TRUNCATE, or DELETE/UPDATE without a narrow predicate.",
       "Destructive NoSQL: mongosh drop/dropDatabase, redis-cli FLUSHDB/FLUSHALL, DETACH DATABASE.",
       "Publishing to external registries: npm/yarn/pnpm publish, dotnet nuget push, cargo publish, gem push, twine upload, docker/helm push to public registries.",
       "Modifying local trust or secret stores: dotnet user-secrets set/clear, dotnet dev-certs, security add-trusted-cert, keychain writes, update-ca-certificates.",
       "Silently discarding uncommitted work: git checkout . / -- <path>, git restore . / --source, git reflog expire, git stash drop/clear.",
-      "Database or migration destruction: dotnet ef database drop, ef migrations remove after apply, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
+      "Database or migration destruction: dotnet ef database drop, dotnet ef migrations remove with -f/--force, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
     ],
     "hard_deny": [
       "$defaults",
       "Never merge a pull request unless ~/.agents/bin/pr-review-gate reported STATE=PASS or STATE=PASS_NO_CI for that PR at the current head SHA in this session. PASS_NO_CI is the gate's degraded state, returned only when it confirmed no CI run was ever created for that commit — never when CI is merely pending, failing, or still queued. It is a deliberate narrow allowance, not a wildcard: every other STATE remains forbidden, including future states whose names begin with PASS.",
       "Never delete, transfer, or change the visibility of a GitHub repository, and never delete releases or tags.",
-      "Never write to files under the user's home directory outside the session's working directory, ~/.claude, and ~/.agents — this includes ~/Documents, ~/Desktop, ~/Pictures, ~/Library, and shell startup files. Inside ~/.claude only .github/workflows/ carries an Edit deny rule; settings.json no longer does, so the built-in .claude protected-path check gates it instead, and permissions.allow cannot pre-approve that check. Never widen a permission, hook, or sandbox boundary in settings.json on your own initiative — unconditionally, in every mode: an instruction to review, tidy, or improve the settings never authorizes widening one. Bash and Write-tool writes to settings.json have no hard block at all: sandbox denyWrite covers the sandboxed path only, and the Write(~/.claude/settings.json) deny entry is a signal to this classifier rather than a gate. Route every settings.json change through the Edit tool, where the diff is visible — never shell redirection, never a Write-tool whole-file overwrite. CLAUDE.md and hooks/ rely on sandbox denyWrite plus the same protected-path check, and hooks/ additionally on the content fingerprint pinned in tests/hooks.sha256; that protection covers editing those files and nothing else. It does not extend to git bookkeeping: staging, committing, or pushing those paths writes ~/.claude/.git (index, objects, refs), never the files themselves, and is ordinary version control of the user's own repository — allowed, including when a path argument names one of the protected files."
+      "Never write to files under the user's home directory outside the session's working directory, ~/.claude, ~/.agents, ~/.codex, and ~/.copilot — this includes ~/Documents, ~/Desktop, ~/Pictures, ~/Library, and shell startup files. The ~/.codex and ~/.copilot carve-out matches sandbox.filesystem.allowWrite, which already grants write there; keeping the two layers aligned is the point, and it does not extend to any other home path. Inside ~/.claude only .github/workflows/ carries an Edit deny rule; settings.json no longer does, so the built-in .claude protected-path check gates it instead, and permissions.allow cannot pre-approve that check. Never widen a permission, hook, or sandbox boundary in settings.json on your own initiative — unconditionally, in every mode: an instruction to review, tidy, or improve the settings never authorizes widening one. Bash and Write-tool writes to settings.json have no hard block at all: sandbox denyWrite covers the sandboxed path only, and the Write(~/.claude/settings.json) deny entry is a signal to this classifier rather than a gate. Route every settings.json change through the Edit tool, where the diff is visible — never shell redirection, never a Write-tool whole-file overwrite. CLAUDE.md and hooks/ rely on sandbox denyWrite plus the same protected-path check, and hooks/ additionally on the content fingerprint pinned in tests/hooks.sha256; that protection covers editing those files and nothing else. It does not extend to git bookkeeping: staging, committing, or pushing those paths writes ~/.claude/.git (index, objects, refs), never the files themselves, and is ordinary version control of the user's own repository — allowed, including when a path argument names one of the protected files."
     ],
     "environment": [
       "$defaults",
