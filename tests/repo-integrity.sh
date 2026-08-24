@@ -1001,9 +1001,16 @@ jq -e '
   # .credentials.json 兩層都要在：permissions.deny 擋 Read 工具，sandbox.credentials.files
   # 擋 bash reader（cat/base64/…）。刪任一邊就開一條路，所以配對本身就是保護。
   # mode 一起釘：只釘 path 的話改成 "allow" 會整條失效而測試全綠。
-  ([.permissions.deny[] | select(. == "Read(~/.claude/.credentials.json)")] | length == 1) and
+  # 存在性用 >= 1 不用 == 1（與本檔 hard_deny anchor 同）：== 1 對真正該擋的失效模式
+  # 沒有多給保護——重複一條同字面的 deny 是 config 異味不是保護流失——卻會把「加強式
+  # 新增」誤判成退化。脆弱性換不到鑑別力就不要。
+  ([.permissions.deny[] | select(. == "Read(~/.claude/.credentials.json)")] | length >= 1) and
   ([.sandbox.credentials.files[]
-     | select(.path == "~/.claude/.credentials.json" and .mode == "deny")] | length == 1)
+     | select(.path == "~/.claude/.credentials.json" and .mode == "deny")] | length >= 1) and
+  # 但 >= 1 與 == 1 都漏同一個洞：同一 path 若另有一條 mode 非 deny，兩者皆放行，
+  # 而哪一條生效未定義。所以另外釘「該 path 的所有條目 mode 一律是 deny」。
+  ([.sandbox.credentials.files[]
+     | select(.path == "~/.claude/.credentials.json" and .mode != "deny")] | length == 0)
 ' settings.json >/dev/null || gate_paths_ok=0
 if [ "$gate_paths_ok" -eq 1 ]; then
   ok "gate-critical 路徑仍被釘住：denyWrite 四條（merge gate／hook decision layer／tier0／workflow kernel）與 .credentials.json 的 permissions.deny + sandbox.credentials.files 雙層"
