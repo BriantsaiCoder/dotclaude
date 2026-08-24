@@ -365,6 +365,7 @@
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
   "autoMode": {
+    "classifyAllShell": true,
     "allow": [
       "$defaults",
       "dotnet build/test/run/watch/restore, dotnet ef migrations add",

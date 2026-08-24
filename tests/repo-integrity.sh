@@ -1214,6 +1214,15 @@ else
   bad "Claude model／advisor／effort／thinking contract 漂移"
 fi
 
+# classifyAllShell 翻回 false 或整條消失，auto mode 的 Bash 判定就從 classifier 退回靜態
+# allow 快速路徑——那是本 repo 刻意離開的方向，而且不會有任何東西發現。錨在這裡，
+# 比照上下相鄰兩條的形狀。
+if jq -e '.autoMode.classifyAllShell == true' settings.json 2>/dev/null >/dev/null; then
+  ok "所有 shell 指令走 auto mode classifier（classifyAllShell）"
+else
+  bad "classifyAllShell 未啟用——auto mode 的 Bash 判定會退回靜態 allow 快速路徑"
+fi
+
 if jq -e '.enableAllProjectMcpServers == false' settings.json >/dev/null; then
   ok "Project MCP 不會未經個別啟用而全數載入"
 else
