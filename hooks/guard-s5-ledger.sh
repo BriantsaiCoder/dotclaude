@@ -11,8 +11,10 @@
 # 它進入意識。真正擋在「code 還沒寫」的是 PreToolUse(Write|Edit) 那層，這支只是補網。
 #
 # 設計約束（與 guard-git-push.sh / guard-pr-merge.sh 同）：
-#   * fail-closed：是 gh pr create 但讀不到 body、jq 缺席、body-file 不可讀 → 一律拒絕。
-#   * 非 PR 建立指令安靜結束（無輸出、exit 0）。
+#   * fail-closed：是 gh pr create、或是會改寫 body 的 gh pr edit，但讀不到 body、
+#     jq 缺席、body-file 不可讀 → 一律拒絕。
+#   * 目標是讓既非 PR 建立、也不改寫 body 的指令安靜結束（無輸出、exit 0）；
+#     字串比對做不到精確，已知的誤擋類別列在下方 dispatch 處的 ceiling 清單。
 #   * 比對整個 command 字串，刻意接受誤擋，不解析 shell 語法——那會開出引號規避路徑。
 # 與 guard-git-push.sh／guard-pr-merge.sh 對齊，刻意**不用** -e：PreToolUse 只有 exit 2
 # 阻擋，任何意外的 exit 1 都是靜默放行，而 -e 正是把所有非預期失敗導向那裡的管道。
@@ -70,11 +72,18 @@ if [ "${1:-}" = "--selftest" ]; then
     exit 1
   fi
   fails=0
+  BASH_BIN="$(command -v bash || printf '/bin/bash')"
 
   run_case() {
-    # $1=期望 allow|deny  $2=說明  $3=command
-    local want="$1" label="$2" cmd="$3" out rc
-    out="$(printf '%s' "$cmd" | "$JQ" -R '{tool_input:{command:.}}' | bash "$self" 2>/dev/null)" && rc=0 || rc=$?
+    # $1=期望 allow|deny  $2=說明  $3=command  $4=（選用）被測腳本的 PATH
+    # $4 給空目錄即可測「被測腳本找不到 jq」那條分支；用參數而非全域變數配 set/reset，
+    # 否則任何插進那個窗口的案例都會靜默在無 jq 下執行。
+    local want="$1" label="$2" cmd="$3" runpath="${4:-$PATH}" rc
+    # invoker 用絕對路徑（$4 可能是空目錄，PATH 查找會失敗），但取的是**線上那個**
+    # bash：settings.json 以 `bash ~/.claude/hooks/…` 呼叫，寫死 /bin/bash 會讓 selftest
+    # 在 PATH 前段有較新 bash 的機器上驗到與線上不同的直譯器。
+    printf '%s' "$cmd" | "$JQ" -R '{tool_input:{command:.}}' |
+      PATH="$runpath" "$BASH_BIN" "$self" >/dev/null 2>&1 && rc=0 || rc=$?
     if [ "$want" = "allow" ] && [ "$rc" -eq 0 ]; then
       printf '  PASS  %s\n' "$label"
     elif [ "$want" = "deny" ] && [ "$rc" -eq 2 ]; then
@@ -193,14 +202,44 @@ ate --title t --body "nothing"'
   printf 'S5 Standards: PASS\nS5 Spec: PASS\nreviewer 型別：一次性 prompt 審查\nagent id: wf_deadbeef\nfinding 摘要：無\n命中 Needless Indirection 與 Unused Local Reuse 兩條。\n' > "$other_pair_body"
   run_case allow '五條中任兩條皆成立（非只認固定一組）'        "gh pr create --title t --body-file $other_pair_body"
   # reviewer／finding 兩條檢查原本零覆蓋：把三欄檢查全部短路後只有 agent id 的 case 翻紅
-  # （S5 突變測試實證）。程式是對的，但它們可以被改壞而 selftest 全綠——正是本檔 :55-63
-  # 記載那個形態的近親。
+  # （S5 突變測試實證）。程式是對的，但它們可以被改壞而 selftest 全綠——正是上方 canary
+  # 註解記載那個形態（斷言只看 rc、不驗 deny 的理由）的近親。
   no_reviewer_body="$tmpdir/noreviewer.md"
   printf 'S5 Standards: PASS\nS5 Spec: PASS\nagent id: wf_deadbeef\nfinding 摘要：無\nbaseline: Reinvented Stdlib、Wrong Altitude\n' > "$no_reviewer_body"
   run_case deny  '缺 reviewer 型別'                            "gh pr create --title t --body-file $no_reviewer_body"
   no_finding_body="$tmpdir/nofinding.md"
   printf 'S5 Standards: PASS\nS5 Spec: PASS\nreviewer 型別：一次性 prompt 審查\nagent id: wf_deadbeef\nbaseline: Reinvented Stdlib、Wrong Altitude\n' > "$no_finding_body"
   run_case deny  '缺 finding 摘要'                             "gh pr create --title t --body-file $no_finding_body"
+
+  # ── edit 破口（2026-08-24 補）。先用合格 body 開 PR、再 edit 換掉 body，狀態行就消失
+  # 而 gate 從未執行。deny 半邊釘住「edit 帶 body 要走同一套檢查」，allow 半邊釘住
+  # 「不碰 body 的 edit 不得誤擋」——後者缺席的話，最省事的修法（無條件攔所有 edit）
+  # 會全綠通過，而那會擋掉 --add-label 這類完全正當的操作。
+  run_case deny  'edit 帶 --body-file 但缺兩軸狀態'            "gh pr edit 42 --body-file $bad_body"
+  run_case deny  'edit 帶 --body-file= 形式但缺狀態'           "gh pr edit 42 --body-file=$bad_body"
+  run_case deny  'edit 帶 --body 但缺兩軸狀態'                 'gh pr edit 42 --body "只是改個描述"'
+  run_case allow 'edit 帶 body 且兩軸齊全'                     "gh pr edit 42 --body-file $good_body"
+  run_case allow 'edit 不碰 body：--add-label'                 'gh pr edit 42 --add-label needs-review'
+
+  # ── 不得誤擋。曾經有一版把短旗標 -b／-F 併進同一個 case：實測那一版擋中下列三條
+  # （awk -F／sort -b／ls -F），因為比對是三段子字串、不要求 gh pr edit 真的是被執行的
+  # 指令，所以唯讀查詢、甚至完全沒有 gh 的指令都會命中。留著釘住不再回頭。
+  run_case allow 'edit --add-label 後接 awk -F'                "gh pr edit 42 --add-label x && awk -F: '{print \$1}' /etc/hosts"
+  run_case allow '唯讀查詢 pr list --search edit | sort -b'    'gh pr list --search edit --json number | sort -b'
+  run_case allow '非 gh 指令，路徑含 pr-editor，旗標在後'      'ls docs/highlights/pr-editor/ -F'
+  # arm 順序：把 edit arm 移到 create arm 之前會讓這條落到 edit arm 的 exit 0 成為
+  # fail-open。這是唯一釘住該順序的斷言（實測：現行 rc=2、對調後 rc=0）。
+  run_case deny  'create --fill 且字串含 edit（arm 順序）'     'gh pr create --fill --title "add credit page"'
+
+  # ── jq 不可用分支。run_case 用 $JQ 絕對路徑組 payload，所以第 4 參數指到空目錄只影響
+  # 被測腳本自己找不找得到 jq。用空目錄而非 /nonexistent：invoker 是絕對路徑 /bin/bash，
+  # 兩者實測等價（相對 bash invoker 才會 127）。
+  empty_bin="$tmpdir/nobin"
+  mkdir -p "$empty_bin"
+  run_case deny  '[no jq] create --body-file'                  "gh pr create --title t --body-file $good_body" "$empty_bin"
+  run_case deny  '[no jq] edit --body-file'                    "gh pr edit 42 --body-file $good_body"          "$empty_bin"
+  run_case deny  '[no jq] edit 內聯 --body'                    'gh pr edit 42 --body "沒有狀態行"'              "$empty_bin"
+  run_case allow '[no jq] edit 不碰 body 不誤擋'               'gh pr edit 42 --add-label x'                    "$empty_bin"
 
   printf '\n'
   if [ "$fails" -eq 0 ]; then
@@ -233,6 +272,21 @@ SCAN_INPUT="$(normalize "$INPUT")"
 if [ -z "$JQ" ] || ! CMD=$(printf '%s' "$INPUT" | "$JQ" -r '.tool_input.command // empty' 2>/dev/null); then
   case "$SCAN_INPUT" in
     *gh*pr*create*) deny "[S5-1] jq 不可用或 payload 解析失敗，無法判定是否在開 PR，保守拒絕。請確認 jq 已安裝且在 PATH 中。" ;;
+    # 改寫 body 的 edit 與 create 同等：狀態行被換掉的後果一樣，jq 不可用時同樣保守拒絕。
+    # 結構與下方主路徑相同（3 段外層 + 巢狀 `*--body*`），**不要**改回單一 4 段 pattern
+    # `*gh*pr*edit*--body*`：bash 3.2 的 case glob 對不匹配的長字串是超線性，段數每多
+    # 一段慢一個數量級，實測 4 段在 15KB 是分鐘級（量測見本次 PR 描述）。3 段版在
+    # miss 時同樣超線性，只是慢一個數量級——所以也不要再加第三個 arm。
+    # 兩處判定必須同步改。
+    #
+    # 注意匹配側與不匹配側的極性相反：不匹配時 timeout 被砍掉＝放行，與正確結果相同；
+    # 匹配（該 deny）時被砍掉也是放行，那就與正確結果相反 —— 見下方 ceiling (6)。
+    *gh*pr*edit*)
+      case "$SCAN_INPUT" in
+        *--body*)
+          deny "[S5-1] jq 不可用或 payload 解析失敗，無法判定是否在改寫 PR body，保守拒絕。請確認 jq 已安裝且在 PATH 中。" ;;
+      esac
+      ;;
   esac
   exit 0
 fi
@@ -240,9 +294,58 @@ fi
 [ -z "$CMD" ] && exit 0
 SCAN_CMD="$(normalize "$CMD")"
 
-# 只管 gh ... pr ... create
+# 管 gh ... pr ... create，以及會改寫 body 的 gh ... pr ... edit。
+#
+# 為什麼 edit 也要管：這道 gate 的保證是「PR body 裡有兩軸狀態行」。只攔 create 的話，
+# 先用合格 body 開 PR、再用 edit 把 body 換掉，狀態行就消失了而 gate 從未執行——本檔
+# 上方註解自承的破口，2026-08-24 實測確認帶 --body-file 的 edit 完全不進這支。
+#
+# 但不是所有 edit 都要求 ledger：--add-label／--add-assignee／--title 不碰 body，
+# 而下面的檢查會拿「command 字串 + --body-file 內容」當 body 找狀態行，對不碰 body 的
+# edit 必然找不到 → 誤擋一批完全正當的操作。所以只在 edit 真的改 body 時才管。
+#
+# 只認長形式 `--body*`（涵蓋 --body、--body-file、--body-file=）。短旗標 `-b`／`-F` 曾經
+# 也攔，兩輪 S5 各自量出誤擋多於攔截後移除（量測與語料見本次 PR 描述）：這裡的比對是
+# 三段子字串、不要求 `gh pr edit` 真的是被執行的指令，而 `-b`／`-F` 屬於一大票程式。
+#
+# Ceiling，明講——這道 gate 只擋「整個階段沒進意識」的疏漏，擋不住任何刻意規避。
+# 以下**放行**路徑實測確認，都不打算補：
+#   (1) 複合指令：`gh pr edit N --body-file 合格.md && gh pr edit N --body "沒有狀態行"`。
+#       成因是 body 抽取取整串最後一個字面 `--body-file`，第二段的 `--body` 從不進判定；
+#       反方向（`edit 壞.md && edit 合格.md`）同一成因，與走哪個 arm 無關。一個 `&&`
+#       就繞過，這是最便宜的一條。
+#   (2) 短旗標 `-b`／`-F`（見上）。
+#   (3) `gh pr new` —— create 的官方 alias（`gh pr create --help` 的 ALIASES 段）。
+#   (4) `gh api repos/o/r/pulls/N --method PATCH -f body=…`。要管就得比對
+#       `gh*api*pulls*body=`，但那與用 --jq 讀 body 的正當查詢難以區分。
+#   (5) shell 註解誘餌：`gh pr edit N --body '沒有狀態行'  # --body-file 合格.md`
+#       —— 同 (1) 的抽取機制，create 側在 main 就有同一個洞。
+#   (6) hook timeout：settings.json 給這支 5 秒，而 inline `--body` 塞夠長的 gh/pr
+#       密集雜訊會讓上面的 case glob 比對超時被砍掉 → 放行（實測 14000 字元 4.8 秒）。
+#       `--body-file` 免疫（指令列短）。相對 main 不是 regression，但這份清單自承在窮舉。
+# 以及一類**誤擋**（同樣不補）：
+#   (7) 指令字串任何位置出現 `--body` 且同時依序含 gh／pr／edit —— commit message、
+#       `rg` 探查、`--title` 值提到旗標名都會命中。症狀有三種訊息（缺狀態行／`--body-file`
+#       指向一個從該字串憑空造出的路徑／含 command substitution），都指不到真正的問題。
+#       create 側在 main 就是同一個形狀（`git commit -m "… gh pr create …"` 實測即被擋），
+#       本檔 :18「刻意接受誤擋」涵蓋這一類；收斂它需要 token 化解析，違反該設計約束。
+#       jq 不可用時比對範圍是整個 payload（含 description／cwd／transcript_path），比這
+#       行描述的更寬。
 case "$SCAN_CMD" in
+  # 已知 arm shadowing，main 既有行為，本次刻意不動：字串中出現 create 的 edit 指令
+  # （`--add-label created`、`--title "add create button"` 等）會先命中這條，走下面的
+  # body 檢查而被擋。不改成先判 edit —— `gh pr create --fill --title "add credit page"`
+  # 沒有 `--body*`，改順序後會落到 edit arm 的 `exit 0` 變成 fail-open，比誤擋嚴重得多。
+  # 順序由下方 selftest 釘住。
   *gh*pr*create*) ;;
+  *gh*pr*edit*)
+    case "$SCAN_CMD" in
+      # 長形式：走下面與 create 同一套檢查。涵蓋 --body、--body-file、--body-file=。
+      *--body*) ;;
+      # 不碰 body、且字串不含 create 的 edit（--add-label／--add-reviewer 等）安靜放行。
+      *) exit 0 ;;
+    esac
+    ;;
   *) exit 0 ;;
 esac
 
@@ -409,8 +512,8 @@ fi
 #     ledgers.md 成立——那裡標題連同定義一起帶走；對這個裸字串清單不成立。命中的正是
 #     「改這支 hook 並把 diff 貼進 body」那種 PR。改讀 reviewer-template.md 可以堵，但會
 #     把剛擺脫的跨 repo 執行期依賴請回來，不划算。
-#   * `gh pr edit --body-file` 完全不受任何 guard 管（matcher 只認 `gh pr create`），
-#     合規開 PR 後換掉 body 即全繞過。判定邏輯可共用，擴 matcher 是獨立的一次改動。
+#   * （2026-08-24 已修）`gh pr edit` 帶長形式 body 旗標現在走與 create 同一套檢查。
+#     殘留的繞過路徑見上方 dispatch 處的 ceiling 清單。
 record=""
 [[ "$BODY" =~ [Rr]eviewer ]] || record="reviewer 型別"
 [[ "$BODY" =~ [Aa]gent[[:blank:]_-]*[Ii][Dd] ]] || record="${record:+${record}、}agent id"
