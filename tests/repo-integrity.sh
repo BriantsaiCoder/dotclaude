@@ -1184,15 +1184,43 @@ fi
 # 自動寫回 settings.json。釘死單一值會讓每次調整都變成 CI 紅燈——2026-08-05 起磁碟上已是
 # claude-opus-5／xhigh，這條在下次 commit 就會 FAIL。改釘「允許集合」：仍擋得住掉回未指定
 # 或降級到低 effort 的漂移，但不再把使用者的正常調整當成 drift。
+#
+# 2026-08-24：列舉的允許集合仍然漂了 —— `/model` 選 1M-context 變體時寫回的是 `opus[1m]`，
+# 不在 {default, claude-opus-5} 裡，main 因此紅了一次。列舉本身就是那個 bug：每出一種新
+# 命名（別名、context 變體、版本後綴）就要再補一次。改成 model family 前綴判定，
+# 意圖不變（擋得住掉回未指定或降級），但不再需要維護清單。
+#
+# 錨點不可省。第一版寫成裸 `test("opus")`，S5 實測放行 `opusplan` —— 那是 `/model` 選單
+# 裡的真實選項（binary 的 description 是 "Use Opus in plan mode, Sonnet otherwise"），
+# 也就是 main loop 實際跑 Sonnet。無錨點的子字串會用**同一個 `/model` 寫回向量**打開這條
+# 斷言唯一要擋的東西。`claude-3-opus`（舊世代）同理。
+# 實測：default／opus／opus[1m]／claude-opus-5／claude-opus-4-1 → PASS；
+#       opusplan／opusplan[1m]／claude-3-opus／sonnet／haiku／octopus／空字串 → FAIL。
+#
+# 明確兩件這條**不**保證的事，免得下一個人以為它保證了：
+#   * 放行的是 Opus 家族任一世代（`claude-opus-4-1` 會過）。釘死世代等於把剛拆掉的
+#     維護清單裝回來，下一個 Opus 出來又要補一次。
+#   * `default` 分支自 v2.1.197 起實際解析成 Sonnet 5，所以「擋得住降級到 sonnet」只對
+#     明示字串成立，對 `default` 不成立。這是 main 既有的逃生口，本次未動；要收緊是
+#     獨立決定。
 if jq -e '
-  (.model == "default" or .model == "claude-opus-5") and
+  (.model == "default" or (.model | ascii_downcase | test("^(claude-)?opus([-\\[]|$)"))) and
   .advisorModel == "opus" and
   (.effortLevel == "high" or .effortLevel == "xhigh") and
   .alwaysThinkingEnabled == true
-' settings.json >/dev/null; then
+' settings.json 2>/dev/null >/dev/null; then
   ok "Claude main model 在允許集合內；advisor=opus；effort≥high；thinking 啟用"
 else
   bad "Claude model／advisor／effort／thinking contract 漂移"
+fi
+
+# classifyAllShell 翻回 false 或整條消失，auto mode 的 Bash 判定就從 classifier 退回靜態
+# allow 快速路徑——那是本 repo 刻意離開的方向，而且不會有任何東西發現。錨在這裡，
+# 比照上下相鄰兩條的形狀。
+if jq -e '.autoMode.classifyAllShell == true' settings.json 2>/dev/null >/dev/null; then
+  ok "所有 shell 指令走 auto mode classifier（classifyAllShell）"
+else
+  bad "classifyAllShell 未啟用——auto mode 的 Bash 判定會退回靜態 allow 快速路徑"
 fi
 
 if jq -e '.enableAllProjectMcpServers == false' settings.json >/dev/null; then
