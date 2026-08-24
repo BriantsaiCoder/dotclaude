@@ -799,6 +799,65 @@ else
   bad "仍有 npm-only、local-DB-only、no-production-credential 或 latest-LTS 全域假設"
 fi
 
+# ── environment 條目數上限（handoff E1 方向 ii）────────────────────────────────────
+# 上面那條 blocklist 只比對三個硬編碼歷史字串，只認已經犯過的錯。這條補的是體積：
+# 前一 session 被 S5 連續退回的三個版本，custom entry 數分別是 12／13／8，而目前是 4。
+# 上限 6 機械命中 3/3 個歷史失敗版本、對現況零誤擋（實測）。
+#
+# 為什麼是體積而不是內容：內容路線（偵測全稱斷言的形狀）實作過一版，兩軸判 FAIL 後
+# 移除。量測留在下面，重點是它的豁免清單是**被檢查者自己寫的文字**——這道守衛的對手
+# 模型就是 agent 自己，任何 entry 只要挾帶一個 hedge 詞就通過。體積沒有這個性質：
+# 要繞過只能真的少寫，而少寫正是想要的行為。
+#
+# 已知取捨（明講）：`/auto-mode-setup` wizard 會把 proposal 寫回
+# `autoMode.environment`（binary 實測 `autoMode:{environment:a.proposal.environment,…}`）。
+# 跑完 wizard 若超過上限，這條會紅一次。那是刻意的——wizard 一次塞進來的內容本來就
+# 該有人看過再決定留哪些。與 ultracode 當年被移除釘死（:45-48）不同：那是使用者經
+# /config 或 prompt **逐次開關**的偏好，每次調整都紅；wizard 是刻意執行的單次動作。
+env_count=$(jq '[.autoMode.environment[] | select(. != "$defaults")] | length' settings.json 2>/dev/null)
+if ! printf '%s' "$env_count" | grep -Eq '^[0-9]+$'; then
+  # jq 失敗、鍵不存在、或型別不是陣列都會讓 length 拿不到數字。fail-closed：
+  # 同檔其他檢查一律 `jq -e … ; then ok; else bad`，前一版這裡用
+  # `$(jq … 2>/dev/null)` + 空字串判定，實測對壞掉的 JSON 與缺席的 jq 都印 PASS。
+  bad "autoMode.environment 條目數讀不出來（jq 失敗或結構非預期），無法判定是否超過上限"
+elif [ "$env_count" -le 6 ]; then
+  ok "autoMode.environment custom entries = ${env_count}（上限 6；歷史失敗版本為 12／13／8）"
+else
+  bad "autoMode.environment custom entries = ${env_count}，超過上限 6。前一 session 被 S5 退回的三個版本分別是 12／13／8 —— 條目一多就開始塞進未經查證的環境斷言。若這批是 /auto-mode-setup wizard 寫入的，請逐條檢視後刪到 6 以內，或在確認每條都有 live evidence 後調高本上限並說明理由。"
+fi
+
+# ── 為什麼沒有同時做 open-world 內容偵測（2026-08-24）──────────────────────────────
+#
+# 那條只比對三個硬編碼歷史字串，只認已經犯過的錯。看起來顯然該換成「偵測全稱斷言的
+# 形狀」，實作過一版（正規表示式：全稱量詞命中且同一 entry 內無 hedge 詞則報紅），
+# 被 S5 兩軸退回。實測數據，留著避免下一個人重走：
+#
+#   * 危險的無條件全稱斷言 9/10 漏抓；正當敘述 5/5 誤擋
+#   * harness 自己的 $defaults.environment 20 條中誤 flag 16 條，全是
+#     "**Cloud provider(s)**: None configured" 這種最安全的敘述
+#   * 四條「該紅」案例每一條加一個 hedge 片語就轉綠。而 hedge 清單是**被檢查者自己
+#     寫的文字**：這道守衛的對手模型就是 agent 自己，等於把豁免開關交給對手。
+#     這是最要命的一條——上面的數字都可以靠更好的表達式改善，這條不行。
+#   * 詞彙表本身也是 closed-world：any／cannot／impossible／exclusively／zero／sole
+#     一個都不在內
+#   * 前一 session 那句真正錯的斷言是
+#     "Every repo under github.com/BriantsaiCoder is private EXCEPT …/gym-auth-api"
+#     （實測 98 個 repo 有 74 個 PUBLIC）。它因為 EXCEPT 在 hedge 清單裡而被放行 ——
+#     "Every X EXCEPT Y" 是帶 carve-out 的全稱，EXCEPT 是該斷言的構成部分，不是 hedge
+#
+# 兩個先前寫在這裡、後來被 S5 實測推翻的說法，更正如下（原文有誤，勿再引用）：
+#   * 曾寫「真陽性集合 ⊆ blocklist，淨防護為零」——**錯**。blocklist 只比對三個字串，
+#     而上面那句 EXCEPT 斷言不匹配其中任何一個；把 except 移出 hedge 清單後偵測器就
+#     抓得到它。淨防護不為零。
+#   * 曾寫「onboarding 接受後會寫回 environment，所以與 ultracode 同一個陷阱」——
+#     **錯**。binary 實測：`tengu_auto_mode_env_onboarding_accept` 分支只發 telemetry
+#     並清掉 local state，不寫 environment；且其顯示 gate 在 environment 非空時直接
+#     return false。真正寫回的是刻意執行的 `/auto-mode-setup` wizard。當初只憑
+#     telemetry 事件名推論就寫進註解，違反 [T0-1]。
+#
+# 這條路仍然不做，但理由要準確：不是「做不到」，是**做出來的東西對手可以關掉**。
+# 上面的 entry 數上限沒有這個性質，所以走那條。
+
 if jq -e '
   (.permissions.allow | index("Bash(git restore --staged -- *)") != null) and
   (.permissions.deny | index("Bash(git restore --staged *)") == null) and
