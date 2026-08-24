@@ -981,6 +981,43 @@ else
   bad "~/.claude permission 邊界退化（settings.json 的 Edit deny 被加回或 Write deny 被刪、workflows 的 deny、deny 清單規模、sandbox.enabled、或 allowWrite 範圍其中之一）"
 fi
 
+# ── gate-critical denyWrite 與 credential 封鎖面（PR #32 新增，Copilot review 指出無斷言）──
+# 上面那條只釘了三條原始 denyWrite。PR #32 新增的四條與 .credentials.json 的兩層封鎖當時
+# 零斷言——移除任何一條 CI 仍全綠，而它們正是 hard_deny 賴以成立的東西：
+#   ~/.agents/bin              hard_deny[1] 點名 pr-review-gate 為 merge gate，改寫它即可印 PASS
+#   ~/.agents/hooks            programmatic decision layer 本體
+#   ~/.agents/skills/dev-workflow  [INT-*]／[S5-*]／authorization-matrix 的定義來源
+#   ~/.claude/core             tier0-safety.md 本體（CLAUDE.md 第一行 @ 載入）
+# 選入條件是「改它會擊穿一道 gate」，不是「是不是 config」——所以其餘 72 個 skill 與
+# ~/.claude/rules/ 刻意不在此列（它們是內容，由 $defaults Self-Modification 承接），
+# 不要「補齊」它們：denyWrite 沒有「除非使用者要求」的逃生口，會把合法編輯一起鎖死。
+# 上限：這是 sandbox-scoped，unsandboxed retry 時降級為 classifier 判定而非硬擋。
+gate_paths_ok=1
+jq -e '
+  (.sandbox.filesystem.denyWrite | index("~/.claude/core") != null) and
+  (.sandbox.filesystem.denyWrite | index("~/.agents/bin") != null) and
+  (.sandbox.filesystem.denyWrite | index("~/.agents/hooks") != null) and
+  (.sandbox.filesystem.denyWrite | index("~/.agents/skills/dev-workflow") != null) and
+  # .credentials.json 兩層都要在：permissions.deny 擋 Read 工具，sandbox.credentials.files
+  # 擋 bash reader（cat/base64/…）。刪任一邊就開一條路，所以配對本身就是保護。
+  # mode 一起釘：只釘 path 的話改成 "allow" 會整條失效而測試全綠。
+  # 存在性用 >= 1 不用 == 1（與本檔 hard_deny anchor 同）：== 1 對真正該擋的失效模式
+  # 沒有多給保護——重複一條同字面的 deny 是 config 異味不是保護流失——卻會把「加強式
+  # 新增」誤判成退化。脆弱性換不到鑑別力就不要。
+  ([.permissions.deny[] | select(. == "Read(~/.claude/.credentials.json)")] | length >= 1) and
+  ([.sandbox.credentials.files[]
+     | select(.path == "~/.claude/.credentials.json" and .mode == "deny")] | length >= 1) and
+  # 但 >= 1 與 == 1 都漏同一個洞：同一 path 若另有一條 mode 非 deny，兩者皆放行，
+  # 而哪一條生效未定義。所以另外釘「該 path 的所有條目 mode 一律是 deny」。
+  ([.sandbox.credentials.files[]
+     | select(.path == "~/.claude/.credentials.json" and .mode != "deny")] | length == 0)
+' settings.json >/dev/null || gate_paths_ok=0
+if [ "$gate_paths_ok" -eq 1 ]; then
+  ok "gate-critical 路徑仍被釘住：denyWrite 四條（merge gate／hook decision layer／tier0／workflow kernel）與 .credentials.json 的 permissions.deny + sandbox.credentials.files 雙層"
+else
+  bad "gate-critical 封鎖面退化（denyWrite 的 ~/.claude/core／~/.agents/{bin,hooks}／~/.agents/skills/dev-workflow，或 .credentials.json 兩層之一被刪、或 credentials mode 不再是 deny）"
+fi
+
 # hooks 內容指紋。移除 Edit(~/.claude/hooks/**) 之後這是唯一的偵測面：CI 只驗形狀
 # （selftest 有沒有過、anchor 在不在、bash -n），「在既有 hook 尾端附加一行」全部照過。
 # 而 hook 在沙箱外執行，附加的那一行拿得到完整 user 權限。

@@ -49,6 +49,7 @@
       "Read(~/.aws/**)",
       "Read(~/.gnupg/**)",
       "Read(~/.netrc)",
+      "Read(~/.claude/.credentials.json)",
       "Edit(~/Documents/**)",
       "Edit(~/Desktop/**)",
       "Edit(~/Pictures/**)",
@@ -316,7 +317,11 @@
       "denyWrite": [
         "~/.claude/CLAUDE.md",
         "~/.claude/settings.json",
-        "~/.claude/hooks"
+        "~/.claude/hooks",
+        "~/.claude/core",
+        "~/.agents/bin",
+        "~/.agents/hooks",
+        "~/.agents/skills/dev-workflow"
       ]
     },
     "credentials": {
@@ -335,6 +340,10 @@
         },
         {
           "path": "~/.netrc",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.claude/.credentials.json",
           "mode": "deny"
         }
       ]
@@ -356,21 +365,21 @@
   "autoMode": {
     "allow": [
       "$defaults",
-      "dotnet build/test/run/watch/restore, dotnet ef migrations add/update (not drop or remove applied migrations)",
+      "dotnet build/test/run/watch/restore, dotnet ef migrations add",
       "npm/pnpm/yarn install/ci/run/test/build, npx <tool>, vitest, playwright test",
       "docker compose up/down/build/logs/ps, docker run/exec/logs on local containers",
-      "git status/diff/log/show/add/commit/branch (no -D)/checkout <branch>/pull/fetch/stash push/push (non-force)/push --force-with-lease",
-      "Local Operations extension: ~/.claude (github.com/BriantsaiCoder/dotclaude) and ~/.agents (github.com/BriantsaiCoder/agents-config) are the user's own repositories and are in project scope for this user — reading, editing, git status/diff/log/add/commit/branch/pull, and pushing to a feature branch in either is a Local Operation, not scope escalation."
+      "git status/diff/log/show/add/commit/branch (no -D)/checkout <branch>/pull/fetch; git stash push; git push (non-force); git push --force-with-lease <remote> <branch> (exact flag, no other options; never main or master). Neither push clause covers a branch whose name marks it as a deploy or publication target (production, release, deploy, gh-pages, and the like).",
+      "Local Operations extension: ~/.claude (github.com/BriantsaiCoder/dotclaude) and ~/.agents (github.com/BriantsaiCoder/agents-config) are the user's own repositories and are in project scope for this user — reading, editing, git status/diff/log/add/commit/branch/pull, and pushing to a feature branch in either is a Local Operation, not scope escalation. This entry does not extend to editing any $defaults Self-Modification config surface in either repo (that rule's own list governs; ~/.agents/bin/ counts as equivalent for this purpose), nor to reading ~/.claude/.credentials.json."
     ],
     "soft_deny": [
       "$defaults",
-      "Reading or exfiltrating secret files (.env*, appsettings.*.json, *.pem/*.key/*.pfx, ~/.ssh/id_*, ~/.aws/credentials, .npmrc, .netrc) via any reader (cat/less/more/head/tail/bat/xxd/od/hexdump/base64/openssl) or piping them into network tools (curl/nc/scp/rsync).",
+      "Reading or exfiltrating secret files (.env*, appsettings.*.json, *.pem/*.key/*.pfx, ~/.ssh/id_*, ~/.aws/credentials, ~/.claude/.credentials.json, .npmrc, .netrc) via any reader (cat/less/more/head/tail/bat/xxd/od/hexdump/base64/openssl) or piping them into network tools (curl/nc/scp/rsync).",
       "Destructive SQL via any SQL client (CLI, GUI, ORM raw-SQL, or an app's own migration runner): DROP DATABASE/TABLE/SCHEMA, TRUNCATE, or DELETE/UPDATE without a narrow predicate.",
       "Destructive NoSQL: mongosh drop/dropDatabase, redis-cli FLUSHDB/FLUSHALL, DETACH DATABASE.",
       "Publishing to external registries: npm/yarn/pnpm publish, dotnet nuget push, cargo publish, gem push, twine upload, docker/helm push to public registries.",
       "Modifying local trust or secret stores: dotnet user-secrets set/clear, dotnet dev-certs, security add-trusted-cert, keychain writes, update-ca-certificates.",
       "Silently discarding uncommitted work: git checkout . / -- <path>, git restore . / --source, git reflog expire, git stash drop/clear.",
-      "Database or migration destruction: dotnet ef database drop, dotnet ef migrations remove with -f/--force, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
+      "Database or migration destruction: dotnet ef database drop, dotnet ef database update to an earlier migration or to 0 (a rollback, not an upgrade), dotnet ef migrations remove with -f/--force, prisma migrate reset, knex migrate:rollback against non-ephemeral targets."
     ],
     "hard_deny": [
       "$defaults",
@@ -383,7 +392,7 @@
       "Repository config, manifests, lockfiles, CI, and the current task are the source of truth for package manager, database target, and credential/environment boundaries; assume neither local-only nor production access without evidence.",
       "Sandbox is enabled and autoAllowBashIfSandboxed is true — project workspace writable; package manager caches (npm, NuGet, .NET, Playwright browsers) and ~/.Trash also whitelisted via allowWrite. Unsandboxed retry stays available and is gated by the auto-mode classifier rather than a prompt, so unattended runs do not stall.",
       "Preferred stacks: .NET 8 / ASP.NET Core, EF Core, PostgreSQL, Vite + React/Vue, Tailwind, Docker Compose.",
-      "~/.claude is the user's own dotfiles repository (remote: github.com/BriantsaiCoder/dotclaude, private), and ~/.agents is github.com/BriantsaiCoder/agents-config. Routine git operations in either — status, diff, add, commit, branch, push to a feature branch, pull — are ordinary maintenance of the user's own configuration, not scope escalation, even though those paths sit outside the session working directory. Writes under ~/.agents land inside the sandbox because it is in sandbox.filesystem.allowWrite; writes under ~/.claude are not, so they reach the filesystem through the unsandboxed retry path. That retry is expected for ~/.claude and is not an auto-mode bypass."
+      "~/.claude is the user's own dotfiles repository (remote: github.com/BriantsaiCoder/dotclaude, private), and ~/.agents is github.com/BriantsaiCoder/agents-config. Routine git operations in either — status, diff, add, commit, branch, push to a feature branch, pull — are ordinary maintenance of the user's own configuration, not scope escalation, even though those paths sit outside the session working directory. Writes under ~/.agents land inside the sandbox because it is in sandbox.filesystem.allowWrite, except the paths listed in sandbox.filesystem.denyWrite; writes under ~/.claude are not in allowWrite at all, so they reach the filesystem through the unsandboxed retry path. That retry is expected for ~/.claude and is not an auto-mode bypass. denyWrite is selected by one test — would editing this punch through a gate? It covers the settings and CLAUDE.md the classifier itself reads, the merge-gate binary, the hook decision layer, tier0, and the workflow kernel that defines the authorization rules. Ordinary content is deliberately left out — the other skills, ~/.claude/rules/ — because denyWrite has no \"unless the user asked for it\" escape hatch, and the $defaults Self-Modification rule already gates the widening and consent-manufacturing edits there."
     ]
   },
   "fastMode": true,
