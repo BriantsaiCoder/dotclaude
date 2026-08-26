@@ -956,11 +956,43 @@ jq -e '
   # anchor 用 `widen a permission` 不用整句、也不用單字 `widen`。三者實測（2026-08-08 apply
   # pass）：整句對無害改寫（boundary→surface、Never→Do not、少一逗號）報紅；單字 `widen`
   # 對「拿掉禁令句」仍全綠，因為同段後文的 "widening one" 一樣命中；`widen a permission`
-  # 抓到禁令被移除、且兩種無害改寫都不誤擋。長度不換來強度，鑑別力才換。
-  # 上限：substring anchor 抓不到「保留字面但語意被削弱」。這與 ci.yml 對 guard-git-push
+  # 抓到該片語被刪除、且兩種無害改寫都不誤擋。長度不換來強度，鑑別力才換。
+  # 上限：substring anchor 抓不到「保留字面但語意被削弱」。這條一般性上限**仍然成立**，
+  # 下面新增的 anchor 只縮小它、沒有消除它（2026-08-26 實測，見該處）。
+  # 另修一句過強宣稱：上一段原寫 `widen a permission` anchor「抓到禁令被移除」。它抓的是
+  # **片語被字面刪除**——把 `Never widen ... on your own initiative` 改成
+  # `You may widen ... at your own discretion`，兩個 substring 仍 1/1 命中、全檔 82 PASS。
+  # 這與 ci.yml 對 guard-git-push
   # 用判定變數當 anchor 是同一取捨——不用內容 hash，因為 hash 會對任何註解編輯報紅。
+  # 2026-08-25 裁決：hard_deny[3] 加入「使用者指名該具體改動即可授權」，授權來源見 commit
+  # message 與 PR #35。放寬的是授權門檻，不是「AI 可自行判斷」。
+  # 下面三條 anchor 抓的是**片語被字面刪除或字面替換**，不抓語意。2026-08-26 實測三個反例
+  # 皆 82 PASS 全綠：`on your own initiative` 後接 `unless you judge the widening
+  # beneficial`；授權句加一個 OR 臂 `as does any standing instruction to maintain the
+  # machine configuration`；排除句前綴 `it is no longer the case that`。
+  # **加字即繞過——substring anchor 在原理上涵蓋不了這一類，別把它當語意守衛。**
+  # 反向代價：`You must never widen`、`is equivalent for` 這類良性改寫會誤紅（fail-closed，
+  # 可接受）。它們擋得住的是 4f4fa1c 實際發生過的那種**整段刪除**。
   ([.autoMode.hard_deny[] | select(test("settings\\.json"))] | length >= 1) and
   ([.autoMode.hard_deny[] | select(test("widen a permission"))] | length >= 1) and
+  # 極性 anchor：只釘 `widen a permission` 抓不到句子被反轉（見上方「上限」）。連動詞前的
+  # 否定詞一起釘，對 Never→Do not 這種無害改寫仍放行。
+  ([.autoMode.hard_deny[] | select(test("(Never|Do not) widen a permission"))] | length >= 1) and
+  # 授權句 anchor：釘住「指名」這個限定詞。把它弱化成 `Any user instruction, however
+  # general,`（或整句刪除）時，上面三條都抓不到，只有這條會紅。
+  ([.autoMode.hard_deny[] | select(test("naming the specific change"))] | length >= 1) and
+  # allow[5] 的 ~/.agents/bin/pr-review-gate 排除條款：該路徑在 sandbox.allowWrite 內、
+  # 無 denyWrite、目錄名非 .claude 故 built-in protected-path check 不適用，classifier 是
+  # unsandboxed retry 路徑上唯一的 gate，而它 gate 的正是 hard_deny[1] 點名的 merge gate。
+  # 這條 2026-08-26 補上，因為該條款在 PR #35 的前一版被無聲刪除而當時的斷言全綠。
+  # 釘在 allow 全陣列上，所以整條 entry 被 del 掉也會紅。
+  # 為什麼寫確切工具而不是裸目錄 ~/.agents/bin/：~/.agents/tests/three-host-global-config-
+  # ownership.sh 反向斷言禁止 host global config 引用 .agents control plane，allowlist 只放行
+  # agents-branch 與 pr-review-gate 兩個確切工具且硬上限 2 筆。裸目錄寫法會讓那支測試恆紅
+  # （main 上本來就是紅的，2026-08-26 實測 fa012a0 命中 2 處）。
+  # 已知殘留：agents-sync／hook-parity-check／ci-local 等同目錄下其他 binary 不在本排除句內。
+  # 要涵蓋它們得改 ~/.agents 那支測試的 allowlist，屬跨 repo 改動，不在此處理。
+  ([.autoMode.allow[] | select(test("~/\\.agents/bin/pr-review-gate counts as equivalent"))] | length >= 1) and
   # sandbox 這層要連開關一起釘：只釘 denyWrite 的內容而不釘 enabled，把 enabled 改成
   # false 整層失效而測試全綠（同批 mutation 實測）。
   (.sandbox.enabled == true) and
