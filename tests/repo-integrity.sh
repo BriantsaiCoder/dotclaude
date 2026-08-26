@@ -999,18 +999,91 @@ jq -e '
   (.sandbox.filesystem.denyWrite | index("~/.claude/CLAUDE.md") != null) and
   (.sandbox.filesystem.denyWrite | index("~/.claude/settings.json") != null) and
   (.sandbox.filesystem.denyWrite | index("~/.claude/hooks") != null) and
-  # allowWrite 用集合比對而非單一字串：原本只擋 "/Users/pochientsai/.claude" 這個literal，
-  # 換成 tilde 形式或直接加父目錄 "/Users/pochientsai" 都能繞過（實測皆全綠），而父目錄
-  # 嚴格更糟——整個家目錄變成 sandbox 可寫。
-  ([.sandbox.filesystem.allowWrite[]
-     | select(. == "~/.claude" or . == "/Users/pochientsai/.claude"
-              or . == "~" or . == "$HOME" or . == "/Users/pochientsai")]
-   | length == 0)
+  # allowWrite 用**整陣列等值比對**（實作見下方）。這裡記兩代前身為什麼都不夠：
+  #   第一代「只擋五個 literal」：2026-08-26 mutation 實測被 "~/.claude/"、
+  #     "/Users/pochientsai/.claude/"、"/Users/pochientsai/.claude/.."、"$HOME/.claude"
+  #     四種拼法全數繞過而全套仍全綠。其中父目錄那條會讓整個家目錄變成 sandbox 可寫。
+  #   第二代「rstrip + ${HOME}／Users 前綴改寫 + 第一個 * 處截斷」：實測淨值為負，
+  #     詳見下方等值比對的理由段。
+  # 教訓是「枚舉必然漏」這個結論本身下錯了——漏的是**部分**枚舉。allowWrite 是 15 條
+  # 字面路徑的 security boundary，枚舉**全部**並要求逐項相同才是對的形狀。
+  #
+  # 2026-08-25 量測（settings.json 的 prose 只留定性敘述，數字留在這裡）：
+  #   把 "/Users/pochientsai/.claude" 整棵加進 allowWrite，before/after touch 探針顯示
+  #   delta 只有兩處——~/.claude 根目錄散檔、以及 .git/。以下全部仍 denied：
+  #   projects/ hooks/ core/ agents/ commands/ skills/ plugins/ backups/ rules/
+  #   shell-snapshots/ session-env/ jobs/ .github/workflows/ settings.json CLAUDE.md
+  #   來源要分清楚，否則沒人知道哪幾條是承重的：其中**恰好四條**由本 repo 自己的
+  #   denyWrite 提供——CLAUDE.md、settings.json、hooks、core——刪掉就真的沒了；其餘
+  #   （projects/ agents/ commands/ skills/ plugins/ backups/ rules/ shell-snapshots/
+  #   session-env/ jobs/）只來自 harness 預設，本 repo 無對應條目。.github/workflows/
+  #   另計：可確認的只有 permissions.deny 的 Edit()/Write() 兩條（工具層，管不到 Bash
+  #   寫入）；widened allowWrite 下 sandbox 層是否也擋，未經實證。
+  #   結論：projects/ 靠任何 settings.json 改動都開不了，寫 memory 檔要用 Edit/Write
+  #   工具或 unsandboxed retry；唯一值得的收穫是 .git/（沙箱內 git commit 可行），
+  #   代價是根目錄散檔全開，含 statusline-command.sh（每次 render 執行）與遙測／歷史 log。
+  #   故最終只加 "/Users/pochientsai/.claude/.git"。
+  #
+  # 同日另一組量測：sandbox.filesystem.allowRead 加 "/etc/ssl/cert.pem" 對 git HTTPS
+  #   無效——git push 仍以 `error setting certificate verify locations` 失敗，重啟後亦然。
+  #   **只記這個觀察，不記成因。** 曾寫成「denyRead 的 /**/*.pem 蓋過 allowRead」，但
+  #   可觀測的 policy 把 allowRead 模型化成 allowWithinDeny（deny 之內的 carve-out），
+  #   與該說法相反；且 http.sslCAInfo / http.sslCAPath 在 repo 與 global 皆 unset，
+  #   未確認 git 實際讀哪個 CA 路徑。該條已移除並由下方斷言釘住；要重加請先重新探測。
+  #   網路 git 目前一律走 unsandboxed retry。
+  # 2026-08-27 改成**整陣列等值比對**，先前那套手刻正規化（rstrip + $HOME/Users 改寫 +
+  #   glob 截斷）已整段移除。理由是實測：它關掉約 13 種拼法，卻同時
+  #   (a) 讓三種完全正當的條目誤紅——`~/*.log`、`~/*/build`、`/Users/pochientsai/*/node_modules`
+  #       都不授予 ~/.claude 任何東西，卻被判「邊界退化」；
+  #   (b) 削弱 `..` 檢查——截斷發生在唯一一次比對之前，`~/x*/..` 被吃成 `~/x` 而放行；
+  #   (c) 真正危險的 glob 全部漏掉——`~/.clau*`、`/Users/*`、`/Users/*/.claude`、`~/.claude/.*`
+  #       每一條都能讓整棵 ~/.claude 沙箱可寫，而它們全綠。
+  #   淨值為負，而且它的上限註解自稱「失效方向朝綠、不會誤紅」，被 (a) 直接證偽。
+  #
+  #   allowWrite 是 15 條字面路徑、極少變動的 security boundary，用等值比對才是對的形狀：
+  #   任何新增、移除、改寫、glob、相對段、大小寫變體一律紅，包含 symlink 目標那個
+  #   「字串比對到不了」的天花板——因為連新增一個條目本身就會紅。
+  #   這也是本 repo 既有的釘法（tests/hooks.sha256 釘內容、denyWrite 用 index() 釘字面）。
+  #   sort 兩側：harness 自己改寫過 settings.json 並重排 key（PR #34 的 /model 事件），
+  #   純順序變動不該紅。
+  #   代價（刻意）：任何 allowWrite 增刪都要同步改這裡。對 security boundary 而言，
+  #   那正是要的行為——改動變成明示動作，而不是靜默通過。
+  ((.sandbox.filesystem.allowWrite | sort) == ([
+     "/Users/pochientsai/.nuget",
+     "/Users/pochientsai/.dotnet",
+     "/tmp/.dotnet",
+     "/private/tmp/.dotnet",
+     "/Users/pochientsai/.npm",
+     "/Users/pochientsai/.cache",
+     "/Users/pochientsai/Library/Caches",
+     "/Users/pochientsai/.agents",
+     "/Users/pochientsai/.claude/.git",
+     "/Users/pochientsai/.copilot",
+     "/Users/pochientsai/.codex",
+     "/Users/pochientsai/Downloads/coding_agent_project",
+     "/Users/pochientsai/.agent-browser",
+     "/Users/pochientsai/Library/Application Support/Google/Chrome for Testing",
+     "/Users/pochientsai/.Trash"
+   ] | sort)) and
+  # 釘的是 key 不存在，不只是值為空——allowRead: [] 與 null 同樣報紅（fail-closed）。
+  (.sandbox.filesystem | has("allowRead") | not) and
+  # .git 在 allowWrite 內之後，.git/hooks 變成 sandbox 可寫，而它裝著本 repo 自己的
+  # pre-commit secret gate（[INT-10] gitleaks 那條的機械實作）。實測：加此條前
+  # `touch .git/hooks/.probe` rc=0 檔案建立，加此條後 Operation not permitted。
+  # tests/hooks.sha256 只釘 hooks/，不涵蓋 .git/hooks，所以這是唯一一層。
+  (.sandbox.filesystem.denyWrite | index("~/.claude/.git/hooks") != null) and
+  # .git/config 同樣是 code-execution 面（alias.<x> = !<cmd>、core.fsmonitor），只擋 hooks
+  # 等於只擋一半。注意它是**單一檔案**路徑不是目錄：實測 touch .git/config.probe2 仍 rc=0，
+  # touch .git/config 才回 Operation not permitted，而 .git 其餘路徑照常可寫（git commit
+  # 只動 index／objects／refs，不受影響）。
+  # 上限：與上一條同為字面枚舉，寫成 /Users/pochientsai/... 等效拼法會誤紅——與既有三條
+  # denyWrite 斷言同慣例，不另立形狀。
+  (.sandbox.filesystem.denyWrite | index("~/.claude/.git/config") != null)
 ' settings.json >/dev/null || perm_ok=0
 if [ "$perm_ok" -eq 1 ]; then
-  ok "~/.claude permission 邊界：settings.json 的 Edit deny 依裁決維持移除、Write deny 保留；.github/workflows 兩條保持 deny；deny 清單未被削減；sandbox 已啟用且 allowWrite 不含 ~/.claude 或其父層"
+  ok "~/.claude permission 邊界：settings.json 的 Edit deny 依裁決維持移除、Write deny 保留；.github/workflows 兩條保持 deny；deny 清單未被削減；sandbox 已啟用；allowWrite 與釘死的 15 條字面清單逐項相同（排序後等值；任何增刪改寫皆紅）；allowRead key 不存在；.git/hooks 與 .git/config 皆在 denyWrite 內"
 else
-  bad "~/.claude permission 邊界退化（settings.json 的 Edit deny 被加回或 Write deny 被刪、workflows 的 deny、deny 清單規模、sandbox.enabled、或 allowWrite 範圍其中之一）"
+  bad "~/.claude permission 邊界退化（settings.json 的 Edit deny 被加回或 Write deny 被刪、workflows 的 deny、deny 清單規模、sandbox.enabled、allowWrite 範圍、或 allowRead 被重新加入其中之一）"
 fi
 
 # ── gate-critical denyWrite 與 credential 封鎖面（PR #32 新增，Copilot review 指出無斷言）──
