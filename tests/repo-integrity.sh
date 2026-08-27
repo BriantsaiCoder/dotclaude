@@ -166,6 +166,10 @@ if command -v shellcheck >/dev/null 2>&1; then
   elif shellcheck -S error "${sh_files[@]}"; then ok "shellcheck: ${#sh_files[@]} 個本地 .sh 無 error"
   else bad "shellcheck 發現 error 級問題"; fi
 else
+  # 這個 SKIP 是刻意的 fail-open，不要順手改成 bad。本檔也由 SessionStart 的
+  # drift-check 在本機跑，那裡 shellcheck 未必裝；改 bad 會讓本機每次都紅。
+  # CI 端的洞由 ci.yml 的工具就緒步驟堵住——它在跑本檔之前就硬擋 shellcheck
+  # 缺席。fail-closed 由 CI 承擔、本機保持寬鬆，是分工不是漏改。
   printf '  SKIP  shellcheck 未安裝\n'
 fi
 
