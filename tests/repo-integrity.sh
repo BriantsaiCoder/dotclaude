@@ -729,6 +729,111 @@ if [ -f hooks/guard-pr-merge.sh ]; then
   fi
 fi
 
+# 跨檔 tripwire：本檔**直接驅動** hook，自己斷言 ci= 三態的決策。
+#
+# 為什麼上面那條不夠：它只呼叫 hook 自帶的 --selftest，而那些斷言與它們守的邏輯
+# 同在一個檔案裡。把 hooks/guard-pr-merge.sh 整檔還原到分流之前，斷言會被一起帶走；
+# 再依本檔 FAIL 訊息印出的指令重生 tests/hooks.sha256，整套就是 85 PASS / 0 FAIL
+# 全綠，而 settings.json 仍宣稱 hook 會機械分流。S5 round 1 與 round 2 兩軸各自
+# 實測過這條路徑。只還原 case 區塊（斷言留著）則是 83 PASS / 2 FAIL，抓得到——
+# 抓不到的一直是**整檔**還原。
+#
+# 下面這幾條寫在本檔，所以還原 hook 不會連帶還原它們：整檔還原後 ci=ABSENT 與
+# ci=CANCELLED 會變回放行，這裡就紅。這是唯一能守住那個方向的形狀。
+# 探針形狀沿用同檔上方 _push_probe 的慣例，不另立一套。
+merge_probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || merge_probe_dir=""
+_guard_merge_abs="$PWD/hooks/guard-pr-merge.sh"
+_merge_probe() { # $1=allow|deny $2=gate 印的第一行 $3=說明 [$4=deny 理由必含片語]
+  local want="$1" line="$2" desc="$3" need="${4:-}" rc actual
+  [ -n "$merge_probe_dir" ] ||
+    { bad "pr-merge 守衛無法建立探針目錄"; return; }
+  mkdir -p "$merge_probe_dir/repo"
+  printf '#!/bin/sh\nprintf %%b %s\n' "'$line\n'" > "$merge_probe_dir/gate"
+  chmod +x "$merge_probe_dir/gate"
+  # fixture 有效性：gate 建不起來時 hook 走「找不到 pr-review-gate」，那也是 exit 2，
+  # 於是每個 deny 案例都會假 PASS。這道檢查讓 fixture 壞掉表現為紅而不是綠。
+  # 驗的是**逐字等於預期**而非「非空」：printf %b 會解釋反斜線，將來加一條含反斜線的
+  # fixture 就會被靜默改寫，而非空檢查看不出來。同 commit 內 hook 的 runraw 同一理由。
+  _mp_want=$(printf '%b' "$line")
+  _mp_got=$("$merge_probe_dir/gate" 42 2>/dev/null || true)
+  if [ ! -x "$merge_probe_dir/gate" ] || [ "$_mp_got" != "$_mp_want" ]; then
+    bad "pr-merge 守衛探針 fixture 無效（fake gate 的輸出與預期不符）: $desc"; return
+  fi
+  if jq -nc --arg cmd 'gh pr merge 42' --arg cwd "$merge_probe_dir/repo" \
+       '{tool_input:{command:$cmd},cwd:$cwd}' |
+     PR_REVIEW_GATE="$merge_probe_dir/gate" bash "$_guard_merge_abs" \
+       >"$merge_probe_dir/stdout" 2>"$merge_probe_dir/stderr"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  # hook 若讀不到 fixture gate，它會以「找不到可執行的 pr-review-gate」deny——那也是
+  # exit 2，於是每個 deny 案例都會因為錯的理由而 PASS。selftest 的兩個 helper 都擋這條，
+  # 這裡先前漏了。
+  if grep -q '找不到可執行的 pr-review-gate' "$merge_probe_dir/stderr" 2>/dev/null; then
+    bad "pr-merge 守衛探針：hook 沒讀到 fixture gate: $desc"
+    return
+  fi
+  if [ "$rc" -eq 0 ] && [ ! -s "$merge_probe_dir/stderr" ]; then
+    actual=allow
+  elif [ "$rc" -eq 2 ] && [ -s "$merge_probe_dir/stderr" ] &&
+    jq -se 'length == 1 and .[0].decision == "block"' \
+      "$merge_probe_dir/stderr" >/dev/null 2>&1; then
+    actual=deny
+  elif [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
+    actual=BADOUTPUT
+  else
+    actual="BADEXIT($rc)"
+  fi
+  if [ "$actual" != "$want" ]; then
+    bad "pr-merge 守衛 want=$want got=$actual rc=$rc: $desc"
+    return
+  fi
+  # deny 的理由必須能分辨政策拒絕與格式漂移。只驗 exit code 的話，把政策分支整個
+  # 刪掉、讓 ci=ABSENT 落到「缺欄」分支也是 exit 2，這裡完全看不出來。
+  if [ -n "$need" ] &&
+    ! jq -se --arg want "$need" '.[0].reason | index($want) != null' \
+        "$merge_probe_dir/stderr" >/dev/null 2>&1; then
+    bad "pr-merge 守衛 deny 理由未含「${need}」: $desc"
+    return
+  fi
+  ok "pr-merge 守衛 ${want}: $desc"
+}
+_merge_probe allow 'STATE=PASS pr=42 head=abc ci=SUCCESS review=CURRENT unresolved=0' \
+  'STATE=PASS'
+_merge_probe allow 'STATE=PASS_NO_CI pr=42 head=abc ci=BILLING_QUOTA review=CURRENT unresolved=0' \
+  'ci=BILLING_QUOTA（額度用盡是唯一被授權的降級）'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc ci=ABSENT review=CURRENT unresolved=0' \
+  'ci=ABSENT（CI 該跑而沒跑）' '不授權合併的降級狀態'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc ci=CANCELLED review=CURRENT unresolved=0' \
+  'ci=CANCELLED（CI 該跑而沒跑）' '不授權合併的降級狀態'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc review=CURRENT unresolved=0' \
+  'PASS_NO_CI 但無 ci= 欄' '沒有可辨識的 ci= 欄位'
+_merge_probe deny  'STATE=FAIL_CI pr=42 head=abc review=CURRENT unresolved=0' \
+  'STATE=FAIL_CI' 'merge gate 未通過'
+# 上面六條的 ci= 全落在行中，那是每一版都處理正確的形狀，所以它們只抓得到
+# 「ci= 分流被整套拿掉」。下面這四條才是本 branch 每一版**各自**弄錯的形狀，
+# 抓的是「分流退回某個有 bug 的版本」——那才是真正會發生的迴歸。
+#   ci= 落在行尾              第一版要求 ci 值右側有空白，於是唯一被授權的狀態被擋，
+#                             而政策值拿到「找不到 ci= 欄」這個相反的理由。
+#   值含空白／值裡有 tab       第二版補了前後空白與 tab 正規化，反而讓不存在的 ci= 欄
+#                             被子字串冒充，方向是 fail-open。
+_merge_probe allow 'STATE=PASS_NO_CI pr=42 head=abc review=CURRENT unresolved=0 ci=BILLING_QUOTA' \
+  'ci=BILLING_QUOTA 落在行尾'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc review=CURRENT unresolved=0 ci=ABSENT' \
+  'ci=ABSENT 落在行尾' '不授權合併的降級狀態'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc reason=fell back to ci=BILLING_QUOTA' \
+  '值含空白時子字串不得冒充 ci= 欄' '不是純 KEY=VALUE'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc note=see\tci=BILLING_QUOTA' \
+  '值裡的 tab 不得製造出 ci= 欄' '第一行混用了 tab'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 x=1\tci=ABSENT ci=BILLING_QUOTA' \
+  '混用 tab 與空白時不得繞過政策值' '第一行混用了 tab'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc ci=BILLING_QUOTA ci=RUNNER_OUTAGE review=CURRENT' \
+  '授權值與未知值同行時保守拒絕' '一個以上的 ci= 欄位'
+# 同 push_probe_dir 的慣例（本檔下方 rm -rf 那一行）：探針目錄用完即清，否則本機反覆
+# 跑會在 TMPDIR 累積。CI 每次都是新 runner 所以看不出來，這是本機才會顯現的洩漏。
+[ -z "$merge_probe_dir" ] || rm -rf "$merge_probe_dir"
+
 # guard-s5-ledger 同理：它自帶 selftest（含 SIGPIPE 競態回歸），但註冊上線時沒有
 # 任何東西呼叫它。這支的失效模式是靜默 fail-open——PreToolUse 只有 exit 2 阻擋，任何
 # 意外的 exit 1 都等於放行——沒接線就沒有東西會發現它退化。
@@ -1140,7 +1245,8 @@ jq -e '
   #
   # 上限與上面同源，但要說準（前一版說得太寬）：抓的是**被釘的那幾個片語**的字面刪除與
   # 替換，不是「字面刪除」一般。未被釘的整句照樣可以整段刪掉而全綠——S5 round 2 逐格實測，
-  # 以下五種刪除各自 84 PASS / 0 FAIL：hard_deny[1] 的
+  # 以下各種刪除各自 84 PASS / 0 FAIL（不寫項數：註解一複述可枚舉的數量就會漂移，
+  # 前一版寫「五種」而列出的是四項）：hard_deny[1] 的
   # `Never merge when CI is pending…` 整句、`; hosted CI stays UNAVAILABLE…` 整段子句；
   # hard_deny[2] 的 `, and never delete releases or tags`；hard_deny[3] 的
   # `Route every settings.json change through the Edit tool…` 整句。
@@ -1171,12 +1277,14 @@ jq -e '
   #  ci=CANCELLED 全數改名（gsub）      1  1  1  1  1  0  1  1  1  1   1   84/1
   #  ci=BILLING_QUOTA 全數改名（gsub）  1  1  1  1  1  1  0  1  1  1   1   84/1
   #  evidence：拿掉兩軸                 1  1  1  1  1  1  1  0  1  1   1   84/1
-  #  hook 事實：STATE alone             1  1  1  1  1  1  1  1  0  1   1   84/1
+  #  hook 事實：splits mechanically     1  1  1  1  1  1  1  1  0  1   1   84/1
   #  禁令句整句刪除                     1  1  1  1  1  1  1  1  1  0   1   84/1
   #  suppressed 整段刪除                1  1  1  1  1  1  1  1  1  1   0   84/1
   #
   #  A1 or-enum  A2 禁令極性  A3 gate 身分  A4 新鮮度  A5 封閉性  A6 ci=CANCELLED
-  #  A7 ci=BILLING_QUOTA  A8 evidence  A9 hook 事實  A10 禁令句  A11 suppressed
+  #  A7 ci=BILLING_QUOTA  A8 evidence  A9 hook 事實（片語 2026-08-27 由 STATE alone
+  #  改為 splits them mechanically，因為 hook 那側真的改成機械分流了）  A10 禁令句
+  #  A11 suppressed
   #  （A12 ci=ABSENT 為 PR #38 Copilot 補釘，不在上表欄位內；其突變列已加在上面，
   #    該列在 A1–A11 全為 1 而套件 84/1，正是「只有新加的那條抓得到」的形狀）
   #
@@ -1216,16 +1324,45 @@ jq -e '
   #                                    also benefits from` → 84 PASS / 0 FAIL，義務由必要變成
   #                                    可選而全綠。substring anchor 抓不到極性反轉，本檔別處
   #                                    已寫明這一點，那句話與自己的檔案牴觸。
-  #   matches on the STATE field alone  釘的是 settings.json 這一側的字面，**不是**兩邊的耦合。
-  #                                    前一版寫「哪天 hook 真的改成比對 ci=，這條會紅，逼兩邊
-  #                                    同步」——S5 round 2 用一份會動的 patch 推翻：真的改了
+  #   splits them mechanically         釘的是 settings.json 這一側的字面，**不是**兩邊的耦合。
+  #                                    前一版釘的是 matches on the STATE field alone，並宣稱
+  #                                    「哪天 hook 真的改成比對 ci=，這條會紅，逼兩邊同步」——
+  #                                    S5 round 2 用一份會動的 patch 推翻：真的改了
   #                                    guard-pr-merge.sh 去分辨 ci=、依 FAIL 訊息指示重跑
   #                                    hooks.sha256，結果 84 PASS / 0 FAIL、hook selftest 全綠，
-  #                                    而 settings.json 仍寫著「passes all three identically」，
-  #                                    此時它已是假的。這條只在**片語從 settings.json 消失**時
-  #                                    才紅，方向與宣稱的相反。耦合是單向的：沒有任何東西把
-  #                                    settings.json 的敘述釘到 pr-review-gate 或那道 hook 上。
+  #                                    而 settings.json 仍寫著 passes all three identically，
+  #                                    此時它已是假的。2026-08-27 那次分流真的落地了，同一個
+  #                                    commit 把該敘述換成本片語，假敘述就此消失——但**上限
+  #                                    沒有變**：這條仍只在片語從 settings.json 消失時才紅。
+  #                                    若有人把 guard-pr-merge.sh 的 ci= 分流退回無條件放行、
+  #                                    settings.json 一字不動，這條照樣綠。耦合仍然是單向的。
+  #                                    反向那一側能守到多少，S5 round 1 兩軸各做了一種還原，
+  #                                    結果相反，兩個都要記：
+  #                                      * 只還原 case 區塊、selftest 與 settings.json 不動
+  #                                        → 本套件 83 PASS / 2 FAIL（hook selftest 紅 + 指紋
+  #                                        不符），抓得到。
+  #                                      * **整檔**還原 guard-pr-merge.sh 再依 FAIL 訊息的指示
+  #                                        重生 tests/hooks.sha256 → 本套件 85 PASS / 0 FAIL
+  #                                        全綠，而 settings.json 仍宣稱 hook 會分流。抓不到。
+  #                                        兩道防線同時失效的原因不同：指紋是照它自己印出來的
+  #                                        修復指令重生的；selftest 的斷言與它守的邏輯同在一個
+  #                                        檔案，整檔還原會把斷言一起帶走。
+  #                                    所以正確的說法是「**部分**還原抓得到」，不是「反向那一側
+  #                                    由 selftest 與指紋負責」。本段前一版就是後者，已被實測
+  #                                    推翻。要堵整檔還原，唯一有效的形狀是在**本檔**用假 gate
+  #                                    實跑一次 hook 並斷言 ci=ABSENT 被擋——那是 hook 之外的
+  #                                    斷言，不會跟著它一起被還原。2026-08-27 已實作，見本檔
+  #                                    pr-merge 守衛 selftest 那段下方的 _merge_probe。
+  #                                    數字必須標明還原到**哪一版**，否則會再次高估自己：
+  #                                    第一版的 _merge_probe fixture 全把 ci= 放在行中，
+  #                                    於是還原到 426b81f（分流落地前）是 88/3 抓得到，
+  #                                    還原到 7aad9c1（分流有 bug 的第一版）卻是全綠——
+  #                                    行中形狀每一版都對，測它等於沒測。同一段落至此
+  #                                    第三次高估自己的覆蓋率。補上行尾與值含空白的
+  #                                    fixture 之後，兩個方向才都會紅。
   # 這四條的實測結果併入上方那張逐 anchor 矩陣（A6～A9 欄），此處不重複。
+  # A9 那一列的標籤已隨本次改名更新為新片語；其突變仍是「把該片語從 settings.json 刪掉」，
+  # 與改名前同型，故沿用原本量到的 84/1，未重新量測的部分只有標籤本身。
   # ci=ABSENT 這條是 PR #38 的 Copilot 補的：三個狀態名裡只有它沒被釘，而規則文字自己
   # 宣稱「covers exactly three ci values」。實測 gsub 把 ci=ABSENT 全數改名 → 85 PASS /
   # 0 FAIL 全綠，也就是把 ABSENT 從規則裡拿掉不會被察覺，「內容與守衛不同步」原地復發。
@@ -1236,7 +1373,7 @@ jq -e '
   ([.autoMode.hard_deny[] | select(index("ci=CANCELLED") != null)] | length >= 1) and
   ([.autoMode.hard_deny[] | select(index("ci=BILLING_QUOTA") != null)] | length >= 1) and
   ([.autoMode.hard_deny[] | select(index("independent Standards and Spec review") != null)] | length >= 1) and
-  ([.autoMode.hard_deny[] | select(index("matches on the STATE field alone") != null)] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("splits them mechanically") != null)] | length >= 1) and
   # 2026-08-27 round 2：改寫把 ABSENT／CANCELLED 從「可合併」收成「完全不授權合併」，並補進
   # suppressed=N 的義務。兩段新內容各自零覆蓋（實測整段刪除 84 PASS / 0 FAIL），當場補釘。
   #   禁令句：`do not authorize a merge at all` —— 這是本次收緊的本體，也是 [T0-9]
