@@ -752,8 +752,12 @@ _merge_probe() { # $1=allow|deny $2=gate 印的第一行 $3=說明 [$4=deny 理�
   chmod +x "$merge_probe_dir/gate"
   # fixture 有效性：gate 建不起來時 hook 走「找不到 pr-review-gate」，那也是 exit 2，
   # 於是每個 deny 案例都會假 PASS。這道檢查讓 fixture 壞掉表現為紅而不是綠。
-  if [ ! -x "$merge_probe_dir/gate" ] || [ -z "$("$merge_probe_dir/gate" 42)" ]; then
-    bad "pr-merge 守衛探針 fixture 無效（fake gate 不可執行或無輸出）: $desc"; return
+  # 驗的是**逐字等於預期**而非「非空」：printf %b 會解釋反斜線，將來加一條含反斜線的
+  # fixture 就會被靜默改寫，而非空檢查看不出來。同 commit 內 hook 的 runraw 同一理由。
+  _mp_want=$(printf '%b' "$line")
+  _mp_got=$("$merge_probe_dir/gate" 42 2>/dev/null || true)
+  if [ ! -x "$merge_probe_dir/gate" ] || [ "$_mp_got" != "$_mp_want" ]; then
+    bad "pr-merge 守衛探針 fixture 無效（fake gate 的輸出與預期不符）: $desc"; return
   fi
   if jq -nc --arg cmd 'gh pr merge 42' --arg cwd "$merge_probe_dir/repo" \
        '{tool_input:{command:$cmd},cwd:$cwd}' |
@@ -762,6 +766,13 @@ _merge_probe() { # $1=allow|deny $2=gate 印的第一行 $3=說明 [$4=deny 理�
     rc=0
   else
     rc=$?
+  fi
+  # hook 若讀不到 fixture gate，它會以「找不到可執行的 pr-review-gate」deny——那也是
+  # exit 2，於是每個 deny 案例都會因為錯的理由而 PASS。selftest 的兩個 helper 都擋這條，
+  # 這裡先前漏了。
+  if grep -q '找不到可執行的 pr-review-gate' "$merge_probe_dir/stderr" 2>/dev/null; then
+    bad "pr-merge 守衛探針：hook 沒讀到 fixture gate: $desc"
+    return
   fi
   if [ "$rc" -eq 0 ] && [ ! -s "$merge_probe_dir/stderr" ]; then
     actual=allow
@@ -799,7 +810,26 @@ _merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc ci=CANCELLED review=CURRENT 
 _merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc review=CURRENT unresolved=0' \
   'PASS_NO_CI 但無 ci= 欄' '沒有可辨識的 ci= 欄位'
 _merge_probe deny  'STATE=FAIL_CI pr=42 head=abc review=CURRENT unresolved=0' \
-  'STATE=FAIL_CI'
+  'STATE=FAIL_CI' 'merge gate 未通過'
+# 上面六條的 ci= 全落在行中，那是每一版都處理正確的形狀，所以它們只抓得到
+# 「ci= 分流被整套拿掉」。下面這四條才是本 branch 每一版**各自**弄錯的形狀，
+# 抓的是「分流退回某個有 bug 的版本」——那才是真正會發生的迴歸。
+#   ci= 落在行尾              第一版要求 ci 值右側有空白，於是唯一被授權的狀態被擋，
+#                             而政策值拿到「找不到 ci= 欄」這個相反的理由。
+#   值含空白／值裡有 tab       第二版補了前後空白與 tab 正規化，反而讓不存在的 ci= 欄
+#                             被子字串冒充，方向是 fail-open。
+_merge_probe allow 'STATE=PASS_NO_CI pr=42 head=abc review=CURRENT unresolved=0 ci=BILLING_QUOTA' \
+  'ci=BILLING_QUOTA 落在行尾'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc review=CURRENT unresolved=0 ci=ABSENT' \
+  'ci=ABSENT 落在行尾' '不授權合併的降級狀態'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc reason=fell back to ci=BILLING_QUOTA' \
+  '值含空白時子字串不得冒充 ci= 欄' '不是純 KEY=VALUE'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc note=see\tci=BILLING_QUOTA' \
+  '值裡的 tab 不得製造出 ci= 欄' '第一行混用了 tab'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 x=1\tci=ABSENT ci=BILLING_QUOTA' \
+  '混用 tab 與空白時不得繞過政策值' '第一行混用了 tab'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc ci=BILLING_QUOTA ci=RUNNER_OUTAGE review=CURRENT' \
+  '授權值與未知值同行時保守拒絕' '一個以上的 ci= 欄位'
 
 # guard-s5-ledger 同理：它自帶 selftest（含 SIGPIPE 競態回歸），但註冊上線時沒有
 # 任何東西呼叫它。這支的失效模式是靜默 fail-open——PreToolUse 只有 exit 2 阻擋，任何
@@ -1319,8 +1349,14 @@ jq -e '
   #                                    推翻。要堵整檔還原，唯一有效的形狀是在**本檔**用假 gate
   #                                    實跑一次 hook 並斷言 ci=ABSENT 被擋——那是 hook 之外的
   #                                    斷言，不會跟著它一起被還原。2026-08-27 已實作，見本檔
-  #                                    pr-merge 守衛 selftest 那段下方的 _merge_probe。加上之後
-  #                                    整檔還原 + 重生指紋是 88 PASS / 3 FAIL，不再全綠。
+  #                                    pr-merge 守衛 selftest 那段下方的 _merge_probe。
+  #                                    數字必須標明還原到**哪一版**，否則會再次高估自己：
+  #                                    第一版的 _merge_probe fixture 全把 ci= 放在行中，
+  #                                    於是還原到 426b81f（分流落地前）是 88/3 抓得到，
+  #                                    還原到 7aad9c1（分流有 bug 的第一版）卻是全綠——
+  #                                    行中形狀每一版都對，測它等於沒測。同一段落至此
+  #                                    第三次高估自己的覆蓋率。補上行尾與值含空白的
+  #                                    fixture 之後，兩個方向才都會紅。
   # 這四條的實測結果併入上方那張逐 anchor 矩陣（A6～A9 欄），此處不重複。
   # A9 那一列的標籤已隨本次改名更新為新片語；其突變仍是「把該片語從 settings.json 刪掉」，
   # 與改名前同型，故沿用原本量到的 84/1，未重新量測的部分只有標籤本身。

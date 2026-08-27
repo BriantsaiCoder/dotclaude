@@ -30,16 +30,10 @@ if [ "${1:-}" = "--selftest" ]; then
     exit 1
   fi
   p=0; f=0
-  # fixture 有效性：fake gate 不可執行或印不出東西時，hook 走「找不到 pr-review-gate」
-  # 那條路——那也是 exit 2，於是所有 expect=2 的案例會**假 PASS**。實測把 run() 的
-  # fixture chmod -x，仍有 8 條 gate-dependent 的 expect=2 案例保持綠，而那 8 條正是
-  # 本檔存在的理由（STATE→決策的對應）。兩個 helper 共用這道檢查。
-  gate_ok() { # 1=desc  回傳非 0 表示 fixture 壞掉（呼叫端應記 FAIL 並跳過）
-    [ -x "$d/gate" ] && [ -n "$("$d/gate" 42)" ] && return 0
-    printf '  FAIL  %s（fixture 無效：fake gate 不可執行或無輸出）\n' "$1"; f=$((f+1)); return 1
-  }
   # deny 理由一律拿 jq 解碼後的 .reason 比對，不對 raw JSON 做子字串。理由裡若出現
   # 引號或反斜線，raw JSON 會是跳脫後的形式，子字串比對就會無故落空。
+  # 這一層兩個 helper 都用；fixture 有效性檢查則各寫各的——runraw 要比對逐字相符，
+  # run 只需要「gate 可執行且有輸出」，抽成共用函式反而是只有一個呼叫端的多餘一層。
   reason_has() { # 1=hook 的 stderr  2=必含片語
     printf '%s' "$1" | jq -e --arg want "$2" '.reason | index($want) != null' >/dev/null 2>&1
   }
@@ -54,9 +48,15 @@ if [ "${1:-}" = "--selftest" ]; then
       printf '#!/bin/sh\nexit 1\n' > "$d/gate"
     fi
     chmod +x "$d/gate"
+    # fixture 有效性：fake gate 不可執行或印不出東西時，hook 走「找不到 pr-review-gate」
+    # 那條路——那也是 exit 2，於是所有 expect=2 的案例會**假 PASS**。實測把這裡的 fixture
+    # chmod -x，補這道檢查之前仍有 8 條 gate-dependent 的 expect=2 案例保持綠，而那 8 條
+    # 正是本檔存在的理由（STATE 到決策的對應）。
     # state 為空的案例刻意用一個 exit 1 的 gate（測「gate 執行失敗時擋」），
-    # 它本來就印不出東西，所以那條跳過有效性檢查。
-    if [ -n "$3" ]; then gate_ok "$1" || return; fi
+    # 它本來就印不出東西，所以那條跳過這道檢查。
+    if [ -n "$3" ] && { [ ! -x "$d/gate" ] || [ -z "$("$d/gate" 42)" ]; }; then
+      printf '  FAIL  %s（fixture 無效：fake gate 不可執行或無輸出）\n' "$1"; f=$((f+1)); return
+    fi
     r=$(jq -cn --arg cmd "$2" --arg cwd "$d/repo" '{tool_input:{command:$cmd},cwd:$cwd}' |
       PR_REVIEW_GATE="$d/gate" "$0" 2>&1 >/dev/null)
     g=$?
@@ -159,7 +159,11 @@ if [ "${1:-}" = "--selftest" ]; then
   runraw 'tab 分隔的行 fail-closed' 'STATE=PASS_NO_CI\tpr=42\tci=BILLING_QUOTA\treview=CURRENT\n' 2 'merge gate 未通過'
   runraw 'tab 分隔的政策值也 fail-closed' 'STATE=PASS_NO_CI\tpr=42\tci=ABSENT\n' 2 'merge gate 未通過'
   runraw '值裡面的 tab 不得製造出 ci= 欄' \
-    'STATE=PASS_NO_CI pr=42 head=abc note=see\tci=BILLING_QUOTA\n' 2 '沒有可辨識的 ci= 欄位'
+    'STATE=PASS_NO_CI pr=42 head=abc note=see\tci=BILLING_QUOTA\n' 2 '第一行混用了 tab'
+  # 混用 tab 與空白：真的有 ci=ABSENT 但它以 tab 相連，只認空白的比對看不到它，
+  # 同行以空白相連的 ci=BILLING_QUOTA 就會贏。這條在加 tab 守衛之前實測是 exit 0。
+  runraw '混用 tab 與空白時不得繞過政策值' \
+    'STATE=PASS_NO_CI pr=42 x=1\tci=ABSENT ci=BILLING_QUOTA\n' 2 '第一行混用了 tab'
   #
   # (2b) CRLF：命令替換只吃掉結尾的 LF，\\r 會留在 LINE1 尾端。不剝掉的話，ci= 是最後
   #      一欄時唯一被授權的狀態被擋、政策值拿到相反的理由、連裸 STATE=PASS 都變成
@@ -195,6 +199,12 @@ if [ "${1:-}" = "--selftest" ]; then
     'STATE=PASS_NO_CI pr=42 ci=ABSENT ci=BILLING_QUOTA review=CURRENT\n' 2 '不授權合併的降級狀態'
   runraw '兩個 ci= 時政策值優先（政策值在後）' \
     'STATE=PASS_NO_CI pr=42 ci=BILLING_QUOTA ci=ABSENT review=CURRENT\n' 2 '不授權合併的降級狀態'
+  # 授權值與**未知**值同行：政策 arm 不命中，若沒有「多個 ci= 欄」那條就會走放行。
+  # 兩個順序都測，理由同上。
+  runraw '授權值與未知值同行時保守拒絕（授權值在前）' \
+    'STATE=PASS_NO_CI pr=42 ci=BILLING_QUOTA ci=RUNNER_OUTAGE review=CURRENT\n' 2 '一個以上的 ci= 欄位'
+  runraw '授權值與未知值同行時保守拒絕（授權值在後）' \
+    'STATE=PASS_NO_CI pr=42 ci=RUNNER_OUTAGE ci=BILLING_QUOTA review=CURRENT\n' 2 '一個以上的 ci= 欄位'
 
   # 這項守的是「明示」本身：舊版寫 STATE=PASS* 前綴 glob，gate 那邊新增任何以 PASS 開頭
   # 的狀態都會被無聲放行，沒有人需要同意。收緊成精確比對後，未列入的一律擋。
@@ -635,11 +645,33 @@ PAD=" $LINE1 "
 case "$PAD" in
   " STATE=PASS "*) exit 0 ;;
   " STATE=PASS_NO_CI "*)
+    # 含 tab 的行先擋掉，而且必須在良構迴圈**之前**。迴圈用 IFS 切詞（空白**加** tab），
+    # 所以 `x=1<TAB>ci=ABSENT` 會被切成兩個都含等號的 token 而取得「良構」資格；但下面的
+    # ci= 比對只認空白，看不到那個以 tab 相連的 ci=ABSENT，於是同一行以空白相連的
+    # ci=BILLING_QUOTA 就贏了——實測 exit 0，一個真的政策拒絕被繞過。
+    # 根因是迴圈與比對對「什麼算分隔」不一致，迴圈的 tab 切詞反而替只認空白的比對背書。
+    # 整行統一用 tab 的情況不會走到這裡（外層 pattern 要求 STATE 後面緊接空白，那種行落到
+    # 最後那條 arm）；這條接的是**混用**。
+    case $LINE1 in
+      *$'\t'*)
+        deny "[T0-9] gate 回報 PASS_NO_CI，但第一行混用了 tab 與空白。ci= 欄位邊界只認單一空白，混用時無法可靠判定哪個 ci= 才是真正的欄位，保守拒絕。pr-review-gate #$PR 回報：$LINE1" ;;
+    esac
     # 先確認整行是純 KEY=VALUE。gate 的每一條 printf 都是這個形狀（reason= 的值以
     # 底線相連，不含空白）。一旦出現不含 = 的 token，就代表某個欄位的值裡有空白，
     # 而此時「ci=X 兩側有空白」不再等於「有一個 ci= 欄位」——
     # `reason=fell back to ci=BILLING_QUOTA` 這種行根本沒有 ci= 欄，卻會讓補空白
     # 之後的子字串比對放行。認不得的格式一律保守拒絕，這是本分支的前提條件。
+    # **這是收窄，不是關閉**，界線要講準。本檢查驗的是「每個 token 都含等號」，而程式碼
+    # 真正需要的是「沒有任何欄位的值裡含空白」——後者推得出前者，反過來不成立。值裡有
+    # 空白、而切出來的每一段又碰巧都帶等號時，檢查就過了。實測皆放行：
+    #     reason=quota= ci=BILLING_QUOTA
+    #     url=h://x?a=b c=d ci=BILLING_QUOTA
+    #     note=a=1 ci=BILLING_QUOTA
+    # 三行都沒有真正的 ci= 欄，那個字串是別的欄位的值的一部分。
+    # 改成逐 token 取 ci= 的值也擋不住——切出來的 `ci=BILLING_QUOTA` 與一個真欄位逐字
+    # 相同，任何以空白為界的方法都分不出來。要真正關閉需要 gate 端把值引號化，那不在
+    # 本 hook 這一側，也不在本次改動的範圍。今天 gate 的 PASS_NO_CI 兩條 printf 的欄位
+    # 值不含空白（reason= 是底線相連的字面），所以不可達。
     # 只在這個分支檢查：STATE=PASS 是行首精確比對騙不過，其餘狀態本來就一律 deny，
     # 對它們額外報「格式不對」只會把「gate 判定不通過」講成別的事。
     # shellcheck disable=SC2086 # 刻意 word-split；set -f 已關 glob
@@ -654,6 +686,12 @@ case "$PAD" in
     case "$PAD" in
       *" ci=ABSENT "*|*" ci=CANCELLED "*)
         deny "[T0-9] gate 回報 PASS_NO_CI，但 ci= 是不授權合併的降級狀態。ABSENT 與 CANCELLED 代表 CI 該跑而沒跑，不是不適用；三者中只有 ci=BILLING_QUOTA 授權合併。請讓 CI 跑起來，不要繞過它。pr-review-gate #$PR 回報：$LINE1" ;;
+      # 一行出現一個以上的 ci= 欄位就無從判定以哪個為準。政策值那條排在更前面，
+      # 所以「政策值 vs 其他任何值」仍由政策值先命中（保守的一邊贏）；這條接的是
+      # 「授權值 vs 未知值」——少了它，ci=BILLING_QUOTA 與一個本規則沒涵蓋的值同行
+      # 時會走放行，與本檔自述的保守優先不一致。
+      *" ci="*" ci="*)
+        deny "[T0-9] gate 回報 PASS_NO_CI，但第一行有一個以上的 ci= 欄位，無法判定以哪個為準，保守拒絕。pr-review-gate #$PR 回報：$LINE1" ;;
       *" ci=BILLING_QUOTA "*) exit 0 ;;
       # ci= 欄在、值不是已知三者之一。與下面那條的差別是**診斷**：這裡欄位好好的，
       # 是 gate 多了一個本規則沒涵蓋的降級理由；下面那條才是欄位不見了。兩者都 deny，
