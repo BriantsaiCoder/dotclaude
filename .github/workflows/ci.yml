@@ -21,8 +21,25 @@ jobs:
       # ripgrep 不可省：repo-integrity.sh 大量以 `rg` 斷言，缺它時不會報錯而是
       # 依斷言極性一半 FAIL、一半假 PASS——2026-08-01 run 30671830610 實證。
       # 這裡不寫死處數：註解一旦複述腳本內容就會漂移（原本寫 12，實際已是 21）。
+      #
+      # update 失敗不致命。runner image 預載第三方 apt repo，其中任何一家掛掉都會讓
+      # apt-get update 回 100；原本的 `&&` 於是讓整步死掉，後面兩步 skipped——
+      # 2026-08-27 run 33035176589 就是這樣紅的（packages.microsoft.com 兩個 repo
+      # 同時 403），那次 run 對 repo 內容零訊號：不是檢查發現問題，是檢查沒機會跑。
+      # update 部分失敗仍會刷新其他 repo 的索引，所以續行。守衛改由下面的 command -v
+      # 承擔：要保證的是工具在不在，而 update 的 exit code 反映的是「所有 apt repo
+      # 都健康」——那是個更嚴格、且與本 repo 無關的條件，拿它當守衛就是誤擋。
       - name: 安裝 shellcheck 與 ripgrep
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck ripgrep
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq || echo "apt-get update 部分失敗，續行（見上方註解）"
+          sudo apt-get install -y -qq shellcheck ripgrep
+          # 兩條都是硬擋，缺一不可。兩者缺席的失效方式不同，但都會表現成「綠」：
+          # shellcheck 缺席 → repo-integrity.sh 第 4 節印 SKIP 而非 FAIL，覆蓋率靜默流失；
+          # rg 缺席 → 依斷言極性半數假 PASS（同上 run 30671830610）。
+          # 也就是 install 靜默少裝一個，整條 pipeline 仍會綠——所以在這裡先擋掉。
+          command -v shellcheck
+          command -v rg
 
       # step 名稱不複述檢查項目，同上理由——檢查了什麼由腳本自己的輸出負責。
       - name: repo 完整性

@@ -856,7 +856,7 @@ fi
 # 稍上方等於下一次合理擴充就紅一次，而紅的次數多了就會被調高，調高幾輪後門檻失去意義。
 # 那正是 ultracode 當年被移除的跑步機。要擋「一條寫成一整頁」得靠 review，不是靠數字。
 #
-# 上限只寫一次、三處引用。ci.yml:23 記過同一個反模式：「註解一旦複述腳本內容就會漂移
+# 上限只寫一次、三處引用。ci.yml 那句「不寫死處數」的註解記過同一個反模式：「註解一旦複述腳本內容就會漂移
 # （原本寫 12，實際已是 21）」——ok／bad 訊息字串也算複述，所以一併走變數。
 ENV_CAP=6
 # 歷史失敗版本的 custom entry 數同樣只寫一次。上一版把 ENV_CAP 抽成變數卻把這個數列
@@ -872,7 +872,7 @@ ENV_HIST="12／13／8（session note，不在本 repo 歷史，無法在此覆�
 env_count=$(jq '.autoMode.environment | if type == "array" then [.[] | select(. != "$defaults")] | length else error("not an array") end' settings.json 2>&1)
 # 形狀檢查用 bash 內建 =~ 而非 `printf | grep -Eq`：省兩個 process，且不依賴 grep 的身分。
 # 本機互動 shell 的 grep 是 ugrep function、script 裡是 BSD grep，兩者行為會飄（同型記載
-# 見 ci.yml:21-22 對 ripgrep 缺席的處置，以及 memory grep-is-ugrep-silent-failure）。
+# 見 ci.yml 對 ripgrep 缺席的處置，以及 memory grep-is-ugrep-silent-failure）。
 # 九種輸入實測兩種寫法判定逐一相同：空字串／4／0／04／7／abc／-1／3.5／前導空白加 4。
 # 形狀用 ^(0|[1-9][0-9]*)$ 而非 ^[0-9]+$，與 pr-review-gate:141 同：後者只驗「長得像數字」，
 # 04 會通過，再進 [ -le ] 就被讀成八進位。目前 jq 的 length 不可能吐 04，所以這是對齊而非
