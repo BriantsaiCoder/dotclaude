@@ -1163,6 +1163,7 @@ jq -e '
   #  gate 身分：reported→returned       0  1  0  1  1  1  1  1  1  1   1   84/1
   #  新鮮度：去掉 current               1  1  1  0  1  1  1  1  1  1   1   84/1
   #  封閉性：all other states           1  1  1  1  0  1  1  1  1  1   1   84/1
+  #  ci=ABSENT 全數改名（gsub）         1  1  1  1  1  1  1  1  1  1   1   84/1
   #  ci=CANCELLED 全數改名（gsub）      1  1  1  1  1  0  1  1  1  1   1   84/1
   #  ci=BILLING_QUOTA 全數改名（gsub）  1  1  1  1  1  1  0  1  1  1   1   84/1
   #  evidence：拿掉兩軸                 1  1  1  1  1  1  1  0  1  1   1   84/1
@@ -1172,6 +1173,8 @@ jq -e '
   #
   #  A1 or-enum  A2 禁令極性  A3 gate 身分  A4 新鮮度  A5 封閉性  A6 ci=CANCELLED
   #  A7 ci=BILLING_QUOTA  A8 evidence  A9 hook 事實  A10 禁令句  A11 suppressed
+  #  （A12 ci=ABSENT 為 PR #38 Copilot 補釘，不在上表欄位內；其突變列已加在上面，
+  #    該列在 A1–A11 全為 1 而套件 84/1，正是「只有新加的那條抓得到」的形狀）
   #
   # 兩件要說準的事：
   #   * **A1 與 A3 重疊**：兩者都含 `reported STATE=PASS`，所以 gate 身分那列同時歸零兩欄。
@@ -1219,6 +1222,13 @@ jq -e '
   #                                    才紅，方向與宣稱的相反。耦合是單向的：沒有任何東西把
   #                                    settings.json 的敘述釘到 pr-review-gate 或那道 hook 上。
   # 這四條的實測結果併入上方那張逐 anchor 矩陣（A6～A9 欄），此處不重複。
+  # ci=ABSENT 這條是 PR #38 的 Copilot 補的：三個狀態名裡只有它沒被釘，而規則文字自己
+  # 宣稱「covers exactly three ci values」。實測 gsub 把 ci=ABSENT 全數改名 → 85 PASS /
+  # 0 FAIL 全綠，也就是把 ABSENT 從規則裡拿掉不會被察覺，「內容與守衛不同步」原地復發。
+  # 三條一起釘之後，任何一個狀態名整批消失都會紅。
+  # 與 A6／A7 同一個上限：釘的是「這個狀態名還在文件裡」，不是「每一處都拼對」——現在
+  # 三個名字各出現兩次（狀態枚舉一次、授權句一次），單處錯字仍抓不到。
+  ([.autoMode.hard_deny[] | select(index("ci=ABSENT") != null)] | length >= 1) and
   ([.autoMode.hard_deny[] | select(index("ci=CANCELLED") != null)] | length >= 1) and
   ([.autoMode.hard_deny[] | select(index("ci=BILLING_QUOTA") != null)] | length >= 1) and
   ([.autoMode.hard_deny[] | select(index("independent Standards and Spec review") != null)] | length >= 1) and
