@@ -483,6 +483,40 @@ else
   fi
 fi
 
+# ── 8b. 本檔註解內不得出現 ASCII 單引號 ──────────────────────────
+#
+# 本檔的斷言大量寫成 `jq -e QUOTE` … `QUOTE settings.json`，其中 QUOTE 是 ASCII 單引號，
+# 中間整段（含 `#` 註解）都在同一個 bash 單引號字串內。註解裡再出現一個 ASCII 單引號就
+# 提前結束該字串：後續的角括號變成 shell redirection、空白變成參數邊界，整支 jq 失效。
+#
+# 為什麼要機械守：這個失效不一定當場變紅。PR #38 的實例是引號**成對**出現在同一行
+# （寫成 core.fsmonitor=＇［指令］＇ 的 ASCII 版），中間又剛好沒有 ASCII 空白，於是 bash
+# 把三段串成同一個 word，jq 收到的程式只少了兩個位在 jq 註解內的字元——測試全綠，靠運氣。
+# 對照實驗：在那對引號之間插入一個 ASCII 空白 → 83 PASS / 1 FAIL，整段 permission 檢查
+# 失效。也就是「綠」與「守衛整段關掉」之間只隔一個空白字元，而 shellcheck 兩種都不報。
+#
+# 為什麼是「所有註解」而不是「jq 區塊內的註解」：後者要追蹤區塊起訖，而本檔的收尾行有
+# 三種形狀（第 0 欄、縮排、以及 `… != "")QUOTE settings.json` 這種夾在行中間的），實作過
+# 一版狀態機，三種形狀各漏一次、分別誤報 72 行與 12 行。無狀態規則沒有這個問題，代價是
+# 對 jq 區塊外的註解也一併要求——那個代價很小（改用全形＇即可），而且是對的方向：程式碼
+# 會被搬動，今天在區塊外的註解明天可能在區塊內。
+#
+# 上限（明講）：只管註解行。非註解行若在 jq 程式內出現 ASCII 單引號同樣會壞，但那裡是
+# jq 程式碼，jq 的字串用雙引號，出現單引號本來就是錯的且多半會當場炸開，不靠這條。
+if ! command -v rg >/dev/null 2>&1; then
+  bad "註解引號檢查需要 rg，但 rg 不可用（缺工具的失敗方向是假綠）"
+else
+  cq_rc=0
+  cq_n=$(rg --count-matches "^\s*#.*'" tests/repo-integrity.sh) || cq_rc=$?
+  if [ "$cq_rc" -eq 1 ]; then
+    ok "本檔註解內無 ASCII 單引號（jq 的 bash 字串不會被提前截斷）"
+  elif [ "$cq_rc" -ne 0 ]; then
+    bad "註解引號檢查掃描失敗（rg rc=${cq_rc}）——不當作通過"
+  else
+    bad "本檔註解含 ASCII 單引號（${cq_n} 行）。它會提前結束 jq 所在的 bash 字串；即使目前成對而僥倖全綠，中間多一個 ASCII 空白就整支 jq 失效。改用全形單引號。定位：rg -n \"^\\s*#.*'\" tests/repo-integrity.sh"
+  fi
+fi
+
 # ── 9. Opus 5 autonomy / audit metadata / permission regressions ─────────────
 tier0_rule_has() {
   local rule="$1" line needle
@@ -635,7 +669,7 @@ _push_probe deny  'git push --mirror origin'
 # 只掃非註解行：本 repo 的守衛註解本身會提到這些字元，掃進去會恆紅。
 #
 # pattern 不對 delimiter 的字元集合做任何假設。第一版寫成 `.?[A-Za-z_]`，漏掉
-# delimiter 以數字開頭的 `<<1` 與 `<<'1'`；第二版改成 `[^=[:space:]]`，又漏掉
+# delimiter 以數字開頭的 `<<1` 與 `<<＇1＇`；第二版改成 `[^=[:space:]]`，又漏掉
 # `<<=EOF` 與 `<< =`（兩者都是合法 here-doc）。兩次都是可繞過的守衛
 # （2026-08-08 agents-config #71／dotclaude #23 review 指出並實測確認）。
 # 不排除任何 delimiter 字元，連 `=` 也不排除。第一版寫成 `[^=[:space:]]`，理由是避開
@@ -695,7 +729,7 @@ fi
 # 任何東西呼叫它。這支的失效模式是靜默 fail-open——PreToolUse 只有 exit 2 阻擋，任何
 # 意外的 exit 1 都等於放行——沒接線就沒有東西會發現它退化。
 # 不寫案數：這行原本寫「18 案」，之後每加一批就漂一次，光這輪就漂了兩回。案數由
-# `grep -c '^  run_case '` 現查即得，寫進註解只是替未來製造 doc rot。
+# `grep -c ＇^  run_case ＇` 現查即得，寫進註解只是替未來製造 doc rot。
 if [ -f hooks/guard-s5-ledger.sh ]; then
   if _s5l_out=$(bash hooks/guard-s5-ledger.sh --selftest 2>&1); then
     ok "s5-ledger 守衛 selftest: $(printf '%s' "$_s5l_out" | tail -1)"
@@ -802,8 +836,8 @@ fi
 # ── environment 條目數上限（handoff E1 方向 ii）────────────────────────────────────
 # 上面那條 blocklist 只比對三個硬編碼歷史字串，只認已經犯過的錯。這條補的是**條目數**：
 # 上限 6 機械命中 3/3 個歷史失敗版本、對現況零誤擋（實測 4 ≤ 6）。那三個失敗版本的
-# custom entry 數是 12／13／8——**來自前一 session 的 S5 退回紀錄，不在本 repo 歷史裡**，
-# 所以那三個數字是 session note，無法在此覆現，別把它們當可稽核量測引用。
+# custom entry 數見下方 ENV_HIST——**來自前一 session 的 S5 退回紀錄，不在本 repo 歷史裡**，
+# 所以那幾個數字是 session note，無法在此覆現，別把它們當可稽核量測引用。
 #
 # 為什麼走條目數而不是內容：內容路線實作過一版，被 S5 兩軸退回。量測與那條路的致命
 # 缺陷完整記在下方「為什麼沒有同時做 open-world 內容偵測」整段，此處不複述。
@@ -822,9 +856,12 @@ fi
 # 稍上方等於下一次合理擴充就紅一次，而紅的次數多了就會被調高，調高幾輪後門檻失去意義。
 # 那正是 ultracode 當年被移除的跑步機。要擋「一條寫成一整頁」得靠 review，不是靠數字。
 #
-# 上限只寫一次、三處引用。ci.yml:22 記過同一個反模式：「註解一旦複述腳本內容就會漂移
+# 上限只寫一次、三處引用。ci.yml:23 記過同一個反模式：「註解一旦複述腳本內容就會漂移
 # （原本寫 12，實際已是 21）」——ok／bad 訊息字串也算複述，所以一併走變數。
 ENV_CAP=6
+# 歷史失敗版本的 custom entry 數同樣只寫一次。上一版把 ENV_CAP 抽成變數卻把這個數列
+# 留在三處（本註解＋ok＋bad），是同一個 hunk 裡半套的修法（S5 round 2 指出）。
+ENV_HIST="12／13／8（session note，不在本 repo 歷史，無法在此覆現）"
 # type 檢查不可省，而且不能寫成 `select(type=="array")`。前一版是裸的
 # `[.autoMode.environment[] | …] | length`，S5 Spec 軸實測：把該鍵換成
 # `{"a":"x","b":"y"}` 時 jq 的 `.[]` 會迭代 **object 的值**，length 回 2，通過數字形狀
@@ -832,21 +869,30 @@ ENV_CAP=6
 # length 變 0，一樣印 PASS，只是把 2 換成 0。要 fail-closed 必須讓 jq 自己**非零退出**，
 # 所以用 error()：stdout 空 → 下面的形狀檢查不匹配 → bad。
 # 2026-08-27 型別矩陣實測：object／string／number／null／鍵刪除 五種全部落到 bad。
-env_count=$(jq '.autoMode.environment | if type == "array" then [.[] | select(. != "$defaults")] | length else error("not an array") end' settings.json 2>/dev/null)
+env_count=$(jq '.autoMode.environment | if type == "array" then [.[] | select(. != "$defaults")] | length else error("not an array") end' settings.json 2>&1)
 # 形狀檢查用 bash 內建 =~ 而非 `printf | grep -Eq`：省兩個 process，且不依賴 grep 的身分。
 # 本機互動 shell 的 grep 是 ugrep function、script 裡是 BSD grep，兩者行為會飄（同型記載
-# 見 ci.yml:20-21 對 ripgrep 缺席的處置，以及 memory grep-is-ugrep-silent-failure）。
-# 九種輸入實測兩種寫法判定逐一相同：''／4／0／04／7／abc／-1／3.5／" 4"。
-# 這原本是本檔唯一的 grep -Eq——其餘文字斷言一律用 rg。
-if [[ ! "$env_count" =~ ^[0-9]+$ ]]; then
+# 見 ci.yml:21-22 對 ripgrep 缺席的處置，以及 memory grep-is-ugrep-silent-failure）。
+# 九種輸入實測兩種寫法判定逐一相同：空字串／4／0／04／7／abc／-1／3.5／前導空白加 4。
+# 形狀用 ^(0|[1-9][0-9]*)$ 而非 ^[0-9]+$，與 pr-review-gate:141 同：後者只驗「長得像數字」，
+# 04 會通過，再進 [ -le ] 就被讀成八進位。目前 jq 的 length 不可能吐 04，所以這是對齊而非
+# 修 bug——但上一行把 04 列在「已測輸入」裡，那個寫法會讓下一個人以為它被處理了。
+# 這原本是本檔唯一的 `grep -Eq`。**不要據此寫成「其餘一律用 rg」**——前一版就是這樣寫的，
+# 而枚舉一跑就破：本檔仍有 24 個 grep 呼叫點（-q／-Fq／-Fqx／-E／-c 等）。改的只是這一處
+# 的數字形狀檢查，不是全檔遷移。這是本 session 第三次犯同一種未枚舉就下覆蓋面斷言的錯，
+# memory coverage-claims-need-mechanical-enumeration 記的就是它。
+if [[ ! "$env_count" =~ ^(0|[1-9][0-9]*)$ ]]; then
   # jq 失敗、鍵不存在、或型別不是陣列都會讓這裡拿不到數字。fail-closed：
   # 同檔其他檢查一律 `jq -e … ; then ok; else bad`，前一版這裡用
   # `$(jq … 2>/dev/null)` + 空字串判定，實測對壞掉的 JSON 與缺席的 jq 都印 PASS。
-  bad "autoMode.environment 條目數讀不出來（jq 失敗或結構非預期），無法判定是否超過上限"
+  # 收 stderr 而非丟棄：本檔第 1 節（:32）就是 `if err=$(jq empty … 2>&1)` 的形狀，
+  # 失敗時把 jq 自己的第一行訊息帶進 bad。丟棄它會讓「型別錯」「JSON 壞」「jq 不存在」
+  # 三種原因印出完全一樣的一行，而這正是同檔另一條 bad 訊息剛花力氣改掉的毛病。
+  bad "autoMode.environment 條目數讀不出來，無法判定是否超過上限（jq: ${env_count%%$'\n'*}）"
 elif [ "$env_count" -le "$ENV_CAP" ]; then
-  ok "autoMode.environment custom entries = ${env_count}（上限 ${ENV_CAP}；歷史失敗版本為 12／13／8，係 session note）"
+  ok "autoMode.environment custom entries = ${env_count}（上限 ${ENV_CAP}；歷史失敗版本 ${ENV_HIST}）"
 else
-  bad "autoMode.environment custom entries = ${env_count}，超過上限 ${ENV_CAP}。前一 session 被 S5 退回的三個版本分別是 12／13／8（session note，不在本 repo 歷史）—— 條目一多就開始塞進未經查證的環境斷言。若這批是 /auto-mode-setup wizard 寫入的，請逐條檢視後刪到上限以內，或在確認每條都有 live evidence 後調高 ENV_CAP 並說明理由。"
+  bad "autoMode.environment custom entries = ${env_count}，超過上限 ${ENV_CAP}。前一 session 被 S5 退回的三個版本分別是 ${ENV_HIST} —— 條目一多就開始塞進未經查證的環境斷言。若這批是 /auto-mode-setup wizard 寫入的，請逐條檢視後刪到上限以內，或在確認每條都有 live evidence 後調高 ENV_CAP 並說明理由。"
 fi
 
 # ── 為什麼沒有同時做 open-world 內容偵測（2026-08-24）──────────────────────────────
@@ -1060,14 +1106,13 @@ jq -e '
   # **加字即繞過——substring anchor 在原理上涵蓋不了這一類，別把它當語意守衛。**
   # 反向代價：`You must never widen`、`is equivalent for` 這類良性改寫會誤紅（fail-closed，
   # 可接受）。它們擋得住的是 4f4fa1c 實際發生過的那種**整段刪除**。
-  ([.autoMode.hard_deny[] | select(test("settings\\.json"))] | length >= 1) and
-  ([.autoMode.hard_deny[] | select(test("widen a permission"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("settings.json") != null)] | length >= 1) and
   # 極性 anchor：只釘 `widen a permission` 抓不到句子被反轉（見上方「上限」）。連動詞前的
   # 否定詞一起釘，對 Never→Do not 這種無害改寫仍放行。
   ([.autoMode.hard_deny[] | select(test("(Never|Do not) widen a permission"))] | length >= 1) and
   # 授權句 anchor：釘住「指名」這個限定詞。把它弱化成 `Any user instruction, however
   # general,`（或整句刪除）時，上面三條都抓不到，只有這條會紅。
-  ([.autoMode.hard_deny[] | select(test("naming the specific change"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("naming the specific change") != null)] | length >= 1) and
   # ── hard_deny[1]（merge gate）的 anchor，2026-08-27 補 ─────────────────────────
   # 上面四條全部釘在談 settings.json 的那條（現為 hard_deny[3]）。merge gate 那條
   # （hard_deny[1]）在**補這幾條之前**是零覆蓋：2026-08-27 於 c2ee288 實測
@@ -1089,7 +1134,13 @@ jq -e '
   # 2026-08-27 的紀錄），本身是待裁決對象。拿待改的句子當 anchor，會讓修正它的那個
   # commit 被自己的守衛擋下。
   #
-  # 上限與上面同源：substring anchor 抓字面刪除與替換，不抓語意；加字仍可繞過。
+  # 上限與上面同源，但要說準（前一版說得太寬）：抓的是**被釘的那幾個片語**的字面刪除與
+  # 替換，不是「字面刪除」一般。未被釘的整句照樣可以整段刪掉而全綠——S5 round 2 逐格實測，
+  # 以下五種刪除各自 84 PASS / 0 FAIL：hard_deny[1] 的
+  # `Never merge when CI is pending…` 整句、`; hosted CI stays UNAVAILABLE…` 整段子句；
+  # hard_deny[2] 的 `, and never delete releases or tags`；hard_deny[3] 的
+  # `Route every settings.json change through the Edit tool…` 整句。
+  # 語意反轉與加字則在原理上就抓不到，兩者都另有實測。
   # 上限二（S5 Spec 軸 S7）：這些條釘的是「**某一條** hard_deny 含該片語」，不是
   # 「hard_deny[1] 含該片語」。今天 del(.autoMode.hard_deny[1]) 會紅，只因這些片語別處
   # 都沒有；把整句搬進 hard_deny[3] 則 merge gate 那條仍可被刪而守衛全綠。與既有
@@ -1100,18 +1151,37 @@ jq -e '
   # 話會不會因為裁決而改變」，不是「這句話離爭議多近」。
   # 給日後改寫的人：若順手把封閉語重寫成「These three are exhaustive; all other states
   # stay forbidden」會紅——那是守衛正常運作，改回字面或連同本行一起更新即可。
-  # 2026-08-27 mutation 矩陣（各自替換成同義改寫，逐格單獨跑）。**套件總數不足以證明
-  # 「各自承重」**：這幾條都是同一個 jq -e 的合取，任何一條掛掉都印同一行 83 / 1，看
-  # 不出是誰。所以下面記的是**逐 anchor 的 test() 命中數**（1 = 該片語仍在，0 = 已消失），
-  # 這才是「彼此不是備份」的證據。S5 Standards 軸以同一格式獨立覆現。
-  #                                          a1 a2 a3 a4  套件
-  #   1 Merge a pull request only if          0  1  1  1  83/1
-  #   2 pr-review-gate returned STATE=PASS    1  0  1  1  83/1
-  #   3 at the head SHA in this session       1  1  0  1  83/1
-  #   4 all other states remain forbidden     1  1  1  0  83/1
-  #   NEG deliberately narrow allowance       1  1  1  1  84/0
-  # NEG 這格的份量要說準：它替換的是**未被任何 anchor 覆蓋**的片語，所以證明的是「這一
-  # 處無關改寫不誤擋」，不是通則。要證通則得改動緊鄰 anchor 的文字。
+  # 2026-08-27 round 2 重測的完整矩陣。**套件總數不足以證明「各自承重」**：這些條都是同一
+  # 個 jq -e 的合取，任何一條掛掉都印同一行，看不出是誰。所以主證據是**逐 anchor 的命中數**
+  # （1 = 該片語仍在，0 = 已消失）；套件總數只放在最右欄佐證。前一版只有四欄、且是在補進
+  # 第五條 anchor 之前量的，round 2 指出 a2 那列已失真（見下方 or-enum 與 gate 身分兩列）。
+  #
+  #  mutation                          A1 A2 A3 A4 A5 A6 A7 A8 A9 A10 A11  套件
+  #  identity（負控制）                 1  1  1  1  1  1  1  1  1  1   1   85/0
+  #  or-enum：插入 STATE=FINDINGS       0  1  1  1  1  1  1  1  1  1   1   84/1
+  #  禁令極性：Merge only if            1  0  1  1  1  1  1  1  1  1   1   84/1
+  #  gate 身分：reported→returned       0  1  0  1  1  1  1  1  1  1   1   84/1
+  #  新鮮度：去掉 current               1  1  1  0  1  1  1  1  1  1   1   84/1
+  #  封閉性：all other states           1  1  1  1  0  1  1  1  1  1   1   84/1
+  #  ci=CANCELLED 全數改名（gsub）      1  1  1  1  1  0  1  1  1  1   1   84/1
+  #  ci=BILLING_QUOTA 全數改名（gsub）  1  1  1  1  1  1  0  1  1  1   1   84/1
+  #  evidence：拿掉兩軸                 1  1  1  1  1  1  1  0  1  1   1   84/1
+  #  hook 事實：STATE alone             1  1  1  1  1  1  1  1  0  1   1   84/1
+  #  禁令句整句刪除                     1  1  1  1  1  1  1  1  1  0   1   84/1
+  #  suppressed 整段刪除                1  1  1  1  1  1  1  1  1  1   0   84/1
+  #
+  #  A1 or-enum  A2 禁令極性  A3 gate 身分  A4 新鮮度  A5 封閉性  A6 ci=CANCELLED
+  #  A7 ci=BILLING_QUOTA  A8 evidence  A9 hook 事實  A10 禁令句  A11 suppressed
+  #
+  # 兩件要說準的事：
+  #   * **A1 與 A3 重疊**：兩者都含 `reported STATE=PASS`，所以 gate 身分那列同時歸零兩欄。
+  #     它們仍各自承重（or-enum 那列只殺 A1，`pr-review-gate`→`the gate` 只殺 A3），但
+  #     「一格一欄」對這一對不成立。
+  #   * **A6／A7 要用 gsub 才紅**：`ci=CANCELLED` 與 `ci=BILLING_QUOTA` 現在各出現兩次
+  #     （狀態枚舉一次、禁令句一次），只改一處時另一處仍讓 index() 命中。也就是這兩條釘的
+  #     是「這個狀態名還在文件裡」，**不是**「每一處都拼對」。單處錯字抓不到。
+  # 負控制的份量也要說準：identity 之外那格替換的是**未被任何 anchor 覆蓋**的片語，證明的
+  # 是「該處無關改寫不誤擋」，不是通則。要證通則得改動緊鄰 anchor 的文字。
   # 允許狀態的**完整枚舉**要一起釘，不能只釘 `reported STATE=PASS`。S5 Standards 軸實測
   # 的加字繞過：把 `STATE=PASS or STATE=PASS_NO_CI` 改成
   # `STATE=PASS, STATE=FINDINGS, or STATE=PASS_NO_CI` → 84 PASS / 0 FAIL 全綠，而
@@ -1120,32 +1190,47 @@ jq -e '
   # 仍抓不到的（誠實列出）：在句末另起一句加豁免（`This rule does not apply when …`）、
   # 把新鮮度句改寫成 `…in this session, or at any earlier SHA if no code changed since`。
   # 兩者實測皆 84 PASS / 0 FAIL。substring anchor 對**加字**在原理上就沒有辦法。
-  ([.autoMode.hard_deny[] | select(test("reported STATE=PASS or STATE=PASS_NO_CI"))] | length >= 1) and
-  ([.autoMode.hard_deny[] | select(test("Never merge a pull request unless"))] | length >= 1) and
-  ([.autoMode.hard_deny[] | select(test("pr-review-gate reported STATE=PASS"))] | length >= 1) and
-  ([.autoMode.hard_deny[] | select(test("at the current head SHA in this session"))] | length >= 1) and
-  ([.autoMode.hard_deny[] | select(test("every other STATE remains forbidden"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("reported STATE=PASS or STATE=PASS_NO_CI") != null)] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("Never merge a pull request unless") != null)] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("pr-review-gate reported STATE=PASS") != null)] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("at the current head SHA in this session") != null)] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("every other STATE remains forbidden") != null)] | length >= 1) and
   # 2026-08-27 第二批：上面四條釘的是這條規則**原本就有**的四個要件；同日把 PASS_NO_CI
   # 的三個 ci 值與各自條件寫進 hard_deny[1] 之後，那段新內容自己又是零覆蓋（實測：改寫
   # "covers exactly three ci values" 84 PASS / 0 FAIL，整段刪除同理）。同一個破口不要再犯
   # 第三次，所以新內容當場補釘。
   #   ci=CANCELLED / ci=BILLING_QUOTA  兩個狀態名被刪 = 規則退回只認 ABSENT，而 gate 仍對
   #                                    三者印同一個 STATE，落差重新打開
-  #   independent Standards and Spec review  這兩個狀態額外要求的 local evidence 本體；
-  #                                    刪掉它們就變成無條件放行，比原規則還鬆
-  #   matches on the STATE field alone  刻意把 hooks/guard-pr-merge.sh 的實作事實釘進來：
-  #                                    哪天那道 hook 真的改成比對 ci=，這條會紅，逼兩邊同步。
-  #                                    這是**想要的**耦合，不是意外。
-  # 2026-08-27 mutation 矩陣（四條各自替換，逐格單獨跑）：
-  #   5 ci=CANCELED（少一個 L）              83 PASS / 1 FAIL
-  #   6 ci=QUOTA                             83 PASS / 1 FAIL
-  #   7 independent review（拿掉兩軸）       83 PASS / 1 FAIL
-  #   8 matches on STATE alone               83 PASS / 1 FAIL
-  #   NEG deliberately narrow allowance      84 PASS / 0 FAIL
-  ([.autoMode.hard_deny[] | select(test("ci=CANCELLED"))] | length >= 1) and
-  ([.autoMode.hard_deny[] | select(test("ci=BILLING_QUOTA"))] | length >= 1) and
-  ([.autoMode.hard_deny[] | select(test("independent Standards and Spec review"))] | length >= 1) and
-  ([.autoMode.hard_deny[] | select(test("matches on the STATE field alone"))] | length >= 1) and
+  #   independent Standards and Spec review  local evidence 本體被**字面刪除**時會紅。
+  #                                    前一版在這裡寫「刪掉它們就變成無條件放行」，暗示這條
+  #                                    守得住那個義務——**守不住**。S5 round 2 實測：保留片語
+  #                                    原字不動，把 `CANCELLED and BILLING_QUOTA may not: each
+  #                                    additionally requires` 改成 `may as well: each ideally
+  #                                    also benefits from` → 84 PASS / 0 FAIL，義務由必要變成
+  #                                    可選而全綠。substring anchor 抓不到極性反轉，本檔別處
+  #                                    已寫明這一點，那句話與自己的檔案牴觸。
+  #   matches on the STATE field alone  釘的是 settings.json 這一側的字面，**不是**兩邊的耦合。
+  #                                    前一版寫「哪天 hook 真的改成比對 ci=，這條會紅，逼兩邊
+  #                                    同步」——S5 round 2 用一份會動的 patch 推翻：真的改了
+  #                                    guard-pr-merge.sh 去分辨 ci=、依 FAIL 訊息指示重跑
+  #                                    hooks.sha256，結果 84 PASS / 0 FAIL、hook selftest 全綠，
+  #                                    而 settings.json 仍寫著「passes all three identically」，
+  #                                    此時它已是假的。這條只在**片語從 settings.json 消失**時
+  #                                    才紅，方向與宣稱的相反。耦合是單向的：沒有任何東西把
+  #                                    settings.json 的敘述釘到 pr-review-gate 或那道 hook 上。
+  # 這四條的實測結果併入上方那張逐 anchor 矩陣（A6～A9 欄），此處不重複。
+  ([.autoMode.hard_deny[] | select(index("ci=CANCELLED") != null)] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("ci=BILLING_QUOTA") != null)] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("independent Standards and Spec review") != null)] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("matches on the STATE field alone") != null)] | length >= 1) and
+  # 2026-08-27 round 2：改寫把 ABSENT／CANCELLED 從「可合併」收成「完全不授權合併」，並補進
+  # suppressed=N 的義務。兩段新內容各自零覆蓋（實測整段刪除 84 PASS / 0 FAIL），當場補釘。
+  #   禁令句：`do not authorize a merge at all` —— 這是本次收緊的本體，也是 [T0-9]
+  #           「applicable CI PASS，例外：無」在本規則裡的落點。
+  #   suppressed：review-triage 記載跨四 repo 六條 finding 有四條藏在該摺疊區，而
+  #           gate 的 unresolved 看不到它們。hard_deny 先前對它一字未提。
+  ([.autoMode.hard_deny[] | select(index("do not authorize a merge at all") != null)] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("suppressed=N") != null)] | length >= 1) and
   # 2026-08-27 第三批（S5 Standards 軸 F7）：把 hard_deny 剩下兩條的零覆蓋一併補上。
   # 實測 del(.autoMode.hard_deny[0]) 與 del(.autoMode.hard_deny[2]) 都是 84 PASS / 0 FAIL。
   #   [0] "$defaults" —— 刪掉它會靜默移除 harness 整組預設 hard_deny，那是這裡條目數最多
@@ -1153,14 +1238,11 @@ jq -e '
   #   [2] repo 刪除／轉移／visibility —— 這條守的是本 repo 真的發生過的失敗類別
   #       （memory: agents-config-visibility-incident）。釘 visibility 那個子句，因為
   #       「不小心放寬」最可能的形狀是刪掉 visibility 只留 delete。
-  # 2026-08-27 矩陣（四格原本全綠，補完後全紅；負控制兩格維持全綠）：
-  #   插入 STATE=FINDINGS                 84/0 → 83/1
-  #   del hard_deny[0]，即 defaults 那條   84/0 → 83/1
-  #   del hard_deny[2]（repo visibility） 84/0 → 83/1
-  #   只刪 visibility 子句、保留 delete   84/0 → 83/1
-  #   NEG 無關改寫 / jq identity          84/0（不變）
+  # 這幾格的實測：四種突變（插入 STATE=FINDINGS、del hard_deny[0]、del hard_deny[2]、
+  # 只刪 visibility 子句而保留 delete）在補釘之前全部 84 PASS / 0 FAIL，補完後全部轉紅；
+  # 負控制（jq identity 與無關改寫）維持全綠。逐 anchor 明細見上方那張矩陣。
   (.autoMode.hard_deny | index("$defaults") != null) and
-  ([.autoMode.hard_deny[] | select(test("change the visibility of a GitHub repository"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("change the visibility of a GitHub repository") != null)] | length >= 1) and
   # allow[5] 的 ~/.agents/bin/pr-review-gate 排除條款：該路徑在 sandbox.allowWrite 內、
   # 無 denyWrite、目錄名非 .claude 故 built-in protected-path check 不適用，classifier 是
   # unsandboxed retry 路徑上唯一的 gate，而它 gate 的正是 hard_deny[1] 點名的 merge gate。
@@ -1278,9 +1360,13 @@ jq -e '
   #
   # 【給下一個編輯本段的人】本段落在 jq -e 的**單引號 bash 字串內**。註解裡放一個 ASCII
   # 單引號就會提前結束該字串，後面的 < > 隨即變成 shell redirection，整支 jq 程式失效。
-  # 2026-08-27 實測踩過一次：寫了 core.fsmonitor='［指令］' → 81 PASS / 3 FAIL，其中一項
-  # 就是本區塊的 perm_ok 整段掛掉。方向是 fail-closed（紅而非假綠），但仍要避開：
-  # 引號用全形，佔位符用［］不用 <>。
+  # 2026-08-27 實測踩過一次：寫了 core.fsmonitor=＇［指令］＇ → 81 PASS / 3 FAIL，其中
+  # 一項就是本區塊的 perm_ok 整段掛掉。方向是 fail-closed（紅而非假綠），但仍要避開：
+  # 引號用全形，佔位符用［］不用 <>。本行原本自己就用了 ASCII 單引號——PR #38 的 Copilot
+  # 抓到。當時測試是綠的，因為那兩個引號**成對**（1002↔此行、此行↔1306），而中間的
+  # ［指令］不含 ASCII 空白，於是 bash 把三段串成同一個 word，jq 收到的程式只少了兩個
+  # 位在 jq 註解內的字元。純屬僥倖：對照實驗把 ［指令］ 改成 ［指 令］（多一個 ASCII
+  # 空白）立刻變 83 PASS / 1 FAIL。下面那條 canary 就是為了不再靠運氣。
   # **但那句話宣稱的封閉性本來就不成立，一併記下**（兩軸皆指出，2026-08-27 於本 session
   # 覆現）。denyWrite 擋的是**檔案**，不是 git 的執行面：
   #     git -c core.fsmonitor=［任意指令］ status → 該指令執行，.git/config 零寫入
@@ -1307,7 +1393,7 @@ jq -e '
 if [ "$perm_ok" -eq 1 ]; then
   ok "~/.claude permission 邊界：settings.json 的 Edit deny 依裁決維持移除、Write deny 保留；.github/workflows 兩條保持 deny；deny 清單未被削減；sandbox 已啟用；allowWrite 與釘死的 15 條字面清單逐項相同（排序後等值；任何增刪改寫皆紅）；allowRead key 不存在；.git/hooks 與 .git/config 皆在 denyWrite 內；autoMode.hard_deny 的四組片語（settings.json 邊界、merge gate 允許狀態與條件、defaults 條目、repo visibility）與 autoMode.allow 的 pr-review-gate 排除條款俱在"
 else
-  bad "~/.claude permission 邊界退化。本條是十餘項合取，只印一行，所以紅了要逐類看：settings.json 的 Edit deny 被加回或 Write deny 被刪、workflows 的 deny、deny 清單規模、sandbox.enabled、allowWrite 範圍、allowRead 被重新加入、denyWrite 的 .git/hooks 或 .git/config、autoMode.hard_deny 談 settings.json 邊界的片語、談 merge gate 的片語（含允許狀態枚舉）、defaults 條目、repo visibility 條目、或 autoMode.allow 的 pr-review-gate 排除條款。定位方式：把下面那支 jq -e 的合取逐段拆開單跑，或先用 jq 讀 .autoMode.hard_deny 看整段是否還在。"
+  bad "~/.claude permission 邊界退化。本條是 38 項合取（2026-08-27 實測），只印一行，所以紅了要逐類看：settings.json 的 Edit deny 被加回或 Write deny 被刪、workflows 的 deny、deny 清單規模、sandbox.enabled、allowWrite 範圍、allowRead 被重新加入、denyWrite 的 .git/hooks 或 .git/config、autoMode.hard_deny 談 settings.json 邊界的片語、談 merge gate 的片語（含允許狀態枚舉）、defaults 條目、repo visibility 條目、或 autoMode.allow 的 pr-review-gate 排除條款。定位方式：把下面那支 jq -e 的合取逐段拆開單跑，或先用 jq 讀 .autoMode.hard_deny 看整段是否還在。"
 fi
 
 # ── gate-critical denyWrite 與 credential 封鎖面（PR #32 新增，Copilot review 指出無斷言）──
