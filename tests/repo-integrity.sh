@@ -1171,12 +1171,14 @@ jq -e '
   #  ci=CANCELLED 全數改名（gsub）      1  1  1  1  1  0  1  1  1  1   1   84/1
   #  ci=BILLING_QUOTA 全數改名（gsub）  1  1  1  1  1  1  0  1  1  1   1   84/1
   #  evidence：拿掉兩軸                 1  1  1  1  1  1  1  0  1  1   1   84/1
-  #  hook 事實：STATE alone             1  1  1  1  1  1  1  1  0  1   1   84/1
+  #  hook 事實：splits mechanically     1  1  1  1  1  1  1  1  0  1   1   84/1
   #  禁令句整句刪除                     1  1  1  1  1  1  1  1  1  0   1   84/1
   #  suppressed 整段刪除                1  1  1  1  1  1  1  1  1  1   0   84/1
   #
   #  A1 or-enum  A2 禁令極性  A3 gate 身分  A4 新鮮度  A5 封閉性  A6 ci=CANCELLED
-  #  A7 ci=BILLING_QUOTA  A8 evidence  A9 hook 事實  A10 禁令句  A11 suppressed
+  #  A7 ci=BILLING_QUOTA  A8 evidence  A9 hook 事實（片語 2026-08-27 由 STATE alone
+  #  改為 splits them mechanically，因為 hook 那側真的改成機械分流了）  A10 禁令句
+  #  A11 suppressed
   #  （A12 ci=ABSENT 為 PR #38 Copilot 補釘，不在上表欄位內；其突變列已加在上面，
   #    該列在 A1–A11 全為 1 而套件 84/1，正是「只有新加的那條抓得到」的形狀）
   #
@@ -1227,10 +1229,26 @@ jq -e '
   #                                    commit 把該敘述換成本片語，假敘述就此消失——但**上限
   #                                    沒有變**：這條仍只在片語從 settings.json 消失時才紅。
   #                                    若有人把 guard-pr-merge.sh 的 ci= 分流退回無條件放行、
-  #                                    settings.json 一字不動，這條照樣綠。反向那一側由 hook
-  #                                    自己 selftest 的五條 ci= 狀態斷言與 tests/hooks.sha256
-  #                                    的內容指紋負責，不是這裡。耦合仍然是單向的。
+  #                                    settings.json 一字不動，這條照樣綠。耦合仍然是單向的。
+  #                                    反向那一側能守到多少，S5 round 1 兩軸各做了一種還原，
+  #                                    結果相反，兩個都要記：
+  #                                      * 只還原 case 區塊、selftest 與 settings.json 不動
+  #                                        → 本套件 83 PASS / 2 FAIL（hook selftest 紅 + 指紋
+  #                                        不符），抓得到。
+  #                                      * **整檔**還原 guard-pr-merge.sh 再依 FAIL 訊息的指示
+  #                                        重生 tests/hooks.sha256 → 本套件 85 PASS / 0 FAIL
+  #                                        全綠，而 settings.json 仍宣稱 hook 會分流。抓不到。
+  #                                        兩道防線同時失效的原因不同：指紋是照它自己印出來的
+  #                                        修復指令重生的；selftest 的斷言與它守的邏輯同在一個
+  #                                        檔案，整檔還原會把斷言一起帶走。
+  #                                    所以正確的說法是「**部分**還原抓得到」，不是「反向那一側
+  #                                    由 selftest 與指紋負責」。本段前一版就是後者，已被實測
+  #                                    推翻。要堵整檔還原，唯一有效的形狀是在**本檔**用假 gate
+  #                                    實跑一次 hook 並斷言 ci=ABSENT 被擋——那是本檔之外的
+  #                                    斷言，不會跟著 hook 一起被還原。尚未實作，列為 follow-up。
   # 這四條的實測結果併入上方那張逐 anchor 矩陣（A6～A9 欄），此處不重複。
+  # A9 那一列的標籤已隨本次改名更新為新片語；其突變仍是「把該片語從 settings.json 刪掉」，
+  # 與改名前同型，故沿用原本量到的 84/1，未重新量測的部分只有標籤本身。
   # ci=ABSENT 這條是 PR #38 的 Copilot 補的：三個狀態名裡只有它沒被釘，而規則文字自己
   # 宣稱「covers exactly three ci values」。實測 gsub 把 ci=ABSENT 全數改名 → 85 PASS /
   # 0 FAIL 全綠，也就是把 ABSENT 從規則裡拿掉不會被察覺，「內容與守衛不同步」原地復發。
