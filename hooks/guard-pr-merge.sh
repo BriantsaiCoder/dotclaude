@@ -30,13 +30,13 @@ if [ "${1:-}" = "--selftest" ]; then
     exit 1
   fi
   p=0; f=0
-  run() { # 1=desc 2=command 3=state 4=expect
+  run() { # 1=desc 2=command 3=state 4=expect 5=額外欄位（選填，接在 head=abc 之後）
     # fake gate 只對 PR 42 回報指定的 STATE，其他編號一律 PASS。這讓「PR 編號抓錯」
     # 表現為誤放行（exit 0），才會被 expect=2 的案例抓到；若不分編號一律回同一個
     # STATE，抓錯編號的 bug 在 selftest 裡完全不可見。
     if [ -n "$3" ]; then
       # shellcheck disable=SC2016 # $1 要原樣寫進 fake gate 腳本，此處不得展開
-      printf '#!/bin/sh\nif [ "$1" = 42 ]; then printf "STATE=%s pr=42 head=abc\\n"; else printf "STATE=PASS pr=%%s head=abc\\n" "$1"; fi\n' "$3" > "$d/gate"
+      printf '#!/bin/sh\nif [ "$1" = 42 ]; then printf "STATE=%s pr=42 head=abc%s\\n"; else printf "STATE=PASS pr=%%s head=abc\\n" "$1"; fi\n' "$3" "${5:-}" > "$d/gate"
     else
       printf '#!/bin/sh\nexit 1\n' > "$d/gate"
     fi
@@ -48,8 +48,22 @@ if [ "${1:-}" = "--selftest" ]; then
     else printf '  FAIL  %s（期望 exit=%s 實得 %s）\n' "$1" "$4" "$g"; f=$((f+1)); fi
   }
   run 'STATE=PASS 放行'          'gh pr merge 42'                 PASS        0
-  # 降級狀態：gate 確定 CI run 根本沒被建立（不是還在跑）時回這個，本 hook 明示接受。
-  run 'STATE=PASS_NO_CI 放行'    'gh pr merge 42'                 PASS_NO_CI  0
+  # 降級狀態依 ci= 分流（hard_deny[1]：三者中只有 BILLING_QUOTA 授權合併）。
+  # 這五項是本檔唯一驗到「哪一種降級可以合併」的地方——舊版三者一律 exit 0，
+  # 分辨完全交給 classifier prose，也就是沒有任何機械攔截。
+  run 'ci=BILLING_QUOTA 放行'    'gh pr merge 42'                 PASS_NO_CI  0 ' ci=BILLING_QUOTA review=CURRENT unresolved=0'
+  # gate 有兩條路徑印 ci=BILLING_QUOTA，另一條帶 review=UNAVAILABLE；兩者都該放行,
+  # hard_deny[1] 不區分它們。只測一條會讓另一條的迴歸看不見。
+  run 'ci=BILLING_QUOTA(review=UNAVAILABLE) 放行' 'gh pr merge 42' PASS_NO_CI 0 ' ci=BILLING_QUOTA review=UNAVAILABLE reason=actions_billing_or_quota'
+  run 'ci=ABSENT 擋'             'gh pr merge 42'                 PASS_NO_CI  2 ' ci=ABSENT review=CURRENT unresolved=0'
+  run 'ci=CANCELLED 擋'          'gh pr merge 42'                 PASS_NO_CI  2 ' ci=CANCELLED review=CURRENT unresolved=0'
+  # 無 ci= 欄位保守拒絕。舊版對這個形狀是 exit 0——放行一個連自己都分不出是哪種
+  # 降級的狀態。deny 理由必須指名缺 ci=，見下方專屬斷言。
+  run 'PASS_NO_CI 無 ci= 欄位擋'  'gh pr merge 42'                 PASS_NO_CI  2
+  # 這項守的是比對時前後帶空白。若寫成 *ci=BILLING_QUOTA* 不帶空白，url 裡的子字串
+  # 就會讓一個根本沒有 ci= 欄位的輸出被誤放行——那是靜默的 fail-open，期望 exit=0
+  # 才抓得到。輸出刻意不含真正的 ci= 欄，只在 url 裡藏該字串。
+  run 'url 裡的 ci= 子字串不誤放行' 'gh pr merge 42'               PASS_NO_CI  2 ' review=CURRENT url=https://x/y?ci=BILLING_QUOTA'
   # 這項守的是「明示」本身：舊版寫 STATE=PASS* 前綴 glob，gate 那邊新增任何以 PASS 開頭
   # 的狀態都會被無聲放行，沒有人需要同意。收緊成精確比對後，未列入的一律擋。
   run '未列入的 PASS_ 前綴仍擋'  'gh pr merge 42'                 PASS_FUTURE 2
@@ -166,9 +180,14 @@ if [ "${1:-}" = "--selftest" ]; then
   fi
 
   # 輸出格式解耦 canary：gate 目前每一行都帶 pr= 等欄位，只比對「STATE=X 後面接空白」也會過。
-  # 但那是把 hook 綁在 gate 現在的格式上——gate 哪天改成只印 STATE，兩個放行狀態都會被誤擋，
-  # 而且是沉默的：merge 停住，理由看起來像 gate 不通過。用只印 STATE 的 fake gate 守住這件事。
-  for st in PASS PASS_NO_CI; do
+  # 但那是把 hook 綁在 gate 現在的格式上——gate 哪天改成只印 STATE，就會被誤擋，而且是
+  # 沉默的：merge 停住，理由看起來像 gate 不通過。用只印 STATE 的 fake gate 守住這件事。
+  #
+  # 2026-08-27 起 PASS_NO_CI 不再列入本迴圈：依 ci= 分流後，一個沒有 ci= 欄的
+  # PASS_NO_CI 無從分辨是三種降級的哪一種，放行它等於放行未知形狀。改為 fail-closed,
+  # 但 canary 的原意（不要沉默地壞掉）以下方那條「deny 理由必須指名缺 ci=」承接——
+  # 要防的是理由說不清楚，不是 deny 本身。
+  for st in PASS; do
     printf '#!/bin/sh\nprintf "STATE=%s\\n"\n' "$st" > "$d/gate"
     chmod +x "$d/gate"
     if jq -cn --arg cmd 'gh pr merge 42' --arg cwd "$d/repo" '{tool_input:{command:$cmd},cwd:$cwd}' |
@@ -178,6 +197,19 @@ if [ "${1:-}" = "--selftest" ]; then
       printf '  FAIL  STATE=%s 無尾隨欄位被誤擋\n' "$st"; f=$((f+1))
     fi
   done
+
+  # 承接上方 canary 的原意：PASS_NO_CI 少了 ci= 欄時擋下來是對的，但理由必須讓人
+  # 一眼看出是「gate 輸出格式變了」而不是「gate 判定不通過」。只驗 exit code 分不出
+  # 這兩者——那正是原 canary 說的沉默壞掉。所以這裡直接驗 deny 理由的字面。
+  printf '#!/bin/sh\nprintf "STATE=PASS_NO_CI pr=42 head=abc review=CURRENT\\n"\n' > "$d/gate"
+  chmod +x "$d/gate"
+  noci_out=$(jq -cn --arg cmd 'gh pr merge 42' --arg cwd "$d/repo" '{tool_input:{command:$cmd},cwd:$cwd}' |
+    PR_REVIEW_GATE="$d/gate" "$0" 2>&1 >/dev/null)
+  if printf '%s' "$noci_out" | jq -e '.decision == "block" and (.reason | index("ci=") != null)' >/dev/null 2>&1; then
+    printf '  PASS  PASS_NO_CI 缺 ci= 欄時 deny 理由指名該欄位\n'; p=$((p+1))
+  else
+    printf '  FAIL  PASS_NO_CI 缺 ci= 欄時 deny 理由未指名該欄位（沉默誤擋）：%s\n' "$noci_out"; f=$((f+1))
+  fi
 
   # json_escape canary：reason 會夾帶 pr-review-gate 的原始輸出，那可能含雙引號或反斜線
   # （GraphQL 錯誤訊息就常有）。只驗 exit code 會漏掉這種失敗——非法 JSON 一樣 exit 2，
@@ -405,18 +437,21 @@ cd "$CWD" || deny "[T0-9] 無法切換到執行目錄（${CWD}），pr-review-ga
 # 它放寬的只有「CI 必須驗過」這一項；unresolved 必須為 0、review 必須對到 current head 這些
 # 條件在 gate 那邊一項都沒鬆。
 #
-# **這道 case 看不到 ci=,別以為它分得出來**（2026-08-27 更正）。原註解寫「接受它是三層明示
+# **這道 case 曾經看不到 ci=**（2026-08-27 更正；同日稍晚已改為分流，見本段末）。
+# 原註解寫「接受它是三層明示
 # 的其中一層，另外兩層是 gate 自己回報 ci=ABSENT，以及 settings.json 的 hard_deny 也必須明寫
 # 接受。任何一層沒改就不會放行」——那句話**不成立**，而且是把不存在的一層算進來：
 #   * gate 對 **三種** ci 值都印同一個 STATE=PASS_NO_CI（pr-review-gate:453 的
 #     ci=BILLING_QUOTA 分支，以及 :480 的 ABSENT|CANCELLED|BILLING_QUOTA 分支）。
 #   * 下面的 case 只比對 STATE= 前綴，ci= 落在 "STATE=PASS_NO_CI "* 的萬用字元裡，
 #     三者一律 exit 0。所謂「gate 自己回報 ci=ABSENT」從來沒有被任何程式碼讀取過。
-# 於是目前唯一能區分三者的只剩 settings.json 的 hard_deny[1]——那是 classifier prose，
-# 不是機械攔截。ci=ABSENT 與 ci=CANCELLED 不授權合併、ci=BILLING_QUOTA 需要的額外
-# local evidence，都寫在那裡。
+# 在分流之前，唯一能區分三者的只剩 settings.json 的 hard_deny[1]——那是 classifier
+# prose，不是機械攔截。ci=ABSENT 與 ci=CANCELLED 不授權合併、ci=BILLING_QUOTA 需要
+# 的額外 local evidence，都寫在那裡；現在下面的 case 對前半段做了機械攔截，後半段
+# （補償證據是否真的成立、suppressed=N 是否逐條處置過）本 hook 仍查不到,依舊由
+# classifier 與人承擔。放行 ci=BILLING_QUOTA 不等於那些條件已經滿足。
 #
-# 為什麼**目前**不在這裡比對 ci=，以及這個理由的邊界（2026-08-27 S5 round 2 更正）：
+# 以下是分流之前「為什麼不在這裡比對 ci=」的理由，及其邊界（2026-08-27 S5 round 2 更正）：
 # 前一版寫的是「那會把 review-triage.md 第 2 節整套 fallback 條件搬進本 hook，而其中沒有
 # 一項是 hook 查得到的」。那句話對「驗證補償證據」成立，但被拿來否定另一件不同的事——
 # **分辨三個狀態**。ci= 就印在 hook 已經讀到的同一行裡，分辨它不需要驗證任何東西。
@@ -424,14 +459,19 @@ cd "$CWD" || deny "[T0-9] 無法切換到執行目錄（${CWD}），pr-review-ga
 # BILLING_QUOTA deny），重跑 hooks.sha256 後 85 PASS / 0 FAIL、本檔 selftest 45 PASS / 0 FAIL。
 # 所以選項有三個不是兩個，而第三個嚴格強於現況的無條件 exit 0。
 #
-# 沒有一併做的理由只有一個：**使用者尚未指名這個改動**。它會把一條目前由 classifier
-# 承擔的判斷變成硬攔截，屬於改變 merge gate 行為，依 hard_deny[3] 要當次指名。
-# 真要做，正確順序是先讓 gate 把補償證據帶進輸出（~/.agents 範圍），再讓本檔比對；
-# 但即使不等那一步，上面那個四行版本也已經比現況強。這段話是給下一個讀者的選項清單，
-# 不是反對意見。
+# 上面兩段描述的是 2026-08-27 之前的狀態，保留是因為它記錄了洞怎麼來的。使用者已於
+# 該日指名此改動，下面的 case 現在依 ci= 分流。**但那份草案的方向是相反的**——它寫
+# ABSENT 放行、BILLING_QUOTA deny，而那早於 PR #38 把 hard_deny[1] 改成「只有
+# BILLING_QUOTA 授權」。照草案實作會同時放行政策禁止的狀態、並擋掉唯一被授權的那個,
+# 也就是 Actions 額度用盡時連合法路徑都沒了。實作採用的是與草案相反的正確方向。
 OUT=$("$GATE" "$PR" 2>&1) || true
 case "$OUT" in
   "STATE=PASS "*|"STATE=PASS")             exit 0 ;;
-  "STATE=PASS_NO_CI "*|"STATE=PASS_NO_CI") exit 0 ;;
+  # ci= 前後帶空白才比對：不加空白會誤配到 url= 或 reason= 裡碰巧出現的子字串。
+  "STATE=PASS_NO_CI "*" ci=ABSENT "*|"STATE=PASS_NO_CI "*" ci=CANCELLED "*)
+    deny "[T0-9] gate 回報 PASS_NO_CI，但 ci= 是不授權合併的降級狀態。ABSENT 與 CANCELLED 代表 CI 該跑而沒跑，不是不適用；三者中只有 ci=BILLING_QUOTA 授權合併。請讓 CI 跑起來，不要繞過它。pr-review-gate #$PR 回報：${OUT%%$'\n'*}" ;;
+  "STATE=PASS_NO_CI "*" ci=BILLING_QUOTA "*) exit 0 ;;
+  "STATE=PASS_NO_CI "*|"STATE=PASS_NO_CI")
+    deny "[T0-9] gate 回報 PASS_NO_CI，但輸出沒有可辨識的 ci= 欄位，無法分辨三種降級狀態中的哪一種，保守拒絕。這通常代表 pr-review-gate 的輸出格式變了——請確認 ci= 欄是否仍以空白分隔。pr-review-gate #$PR 回報：${OUT%%$'\n'*}" ;;
   *) deny "[T0-9] merge gate 未通過，禁止 merge。pr-review-gate #$PR 回報：${OUT%%$'\n'*}" ;;
 esac

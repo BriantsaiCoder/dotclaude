@@ -1216,15 +1216,20 @@ jq -e '
   #                                    also benefits from` → 84 PASS / 0 FAIL，義務由必要變成
   #                                    可選而全綠。substring anchor 抓不到極性反轉，本檔別處
   #                                    已寫明這一點，那句話與自己的檔案牴觸。
-  #   matches on the STATE field alone  釘的是 settings.json 這一側的字面，**不是**兩邊的耦合。
-  #                                    前一版寫「哪天 hook 真的改成比對 ci=，這條會紅，逼兩邊
-  #                                    同步」——S5 round 2 用一份會動的 patch 推翻：真的改了
+  #   splits them mechanically         釘的是 settings.json 這一側的字面，**不是**兩邊的耦合。
+  #                                    前一版釘的是 matches on the STATE field alone，並宣稱
+  #                                    「哪天 hook 真的改成比對 ci=，這條會紅，逼兩邊同步」——
+  #                                    S5 round 2 用一份會動的 patch 推翻：真的改了
   #                                    guard-pr-merge.sh 去分辨 ci=、依 FAIL 訊息指示重跑
   #                                    hooks.sha256，結果 84 PASS / 0 FAIL、hook selftest 全綠，
-  #                                    而 settings.json 仍寫著「passes all three identically」，
-  #                                    此時它已是假的。這條只在**片語從 settings.json 消失**時
-  #                                    才紅，方向與宣稱的相反。耦合是單向的：沒有任何東西把
-  #                                    settings.json 的敘述釘到 pr-review-gate 或那道 hook 上。
+  #                                    而 settings.json 仍寫著 passes all three identically，
+  #                                    此時它已是假的。2026-08-27 那次分流真的落地了，同一個
+  #                                    commit 把該敘述換成本片語，假敘述就此消失——但**上限
+  #                                    沒有變**：這條仍只在片語從 settings.json 消失時才紅。
+  #                                    若有人把 guard-pr-merge.sh 的 ci= 分流退回無條件放行、
+  #                                    settings.json 一字不動，這條照樣綠。反向那一側由 hook
+  #                                    自己 selftest 的五條 ci= 狀態斷言與 tests/hooks.sha256
+  #                                    的內容指紋負責，不是這裡。耦合仍然是單向的。
   # 這四條的實測結果併入上方那張逐 anchor 矩陣（A6～A9 欄），此處不重複。
   # ci=ABSENT 這條是 PR #38 的 Copilot 補的：三個狀態名裡只有它沒被釘，而規則文字自己
   # 宣稱「covers exactly three ci values」。實測 gsub 把 ci=ABSENT 全數改名 → 85 PASS /
@@ -1236,7 +1241,7 @@ jq -e '
   ([.autoMode.hard_deny[] | select(index("ci=CANCELLED") != null)] | length >= 1) and
   ([.autoMode.hard_deny[] | select(index("ci=BILLING_QUOTA") != null)] | length >= 1) and
   ([.autoMode.hard_deny[] | select(index("independent Standards and Spec review") != null)] | length >= 1) and
-  ([.autoMode.hard_deny[] | select(index("matches on the STATE field alone") != null)] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(index("splits them mechanically") != null)] | length >= 1) and
   # 2026-08-27 round 2：改寫把 ABSENT／CANCELLED 從「可合併」收成「完全不授權合併」，並補進
   # suppressed=N 的義務。兩段新內容各自零覆蓋（實測整段刪除 84 PASS / 0 FAIL），當場補釘。
   #   禁令句：`do not authorize a merge at all` —— 這是本次收緊的本體，也是 [T0-9]
