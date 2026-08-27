@@ -1076,6 +1076,27 @@ jq -e '
   ([.autoMode.hard_deny[] | select(test("pr-review-gate reported STATE=PASS"))] | length >= 1) and
   ([.autoMode.hard_deny[] | select(test("at the current head SHA in this session"))] | length >= 1) and
   ([.autoMode.hard_deny[] | select(test("every other STATE remains forbidden"))] | length >= 1) and
+  # 2026-08-27 第二批：上面四條釘的是這條規則**原本就有**的四個要件；同日把 PASS_NO_CI
+  # 的三個 ci 值與各自條件寫進 hard_deny[1] 之後，那段新內容自己又是零覆蓋（實測：改寫
+  # "covers exactly three ci values" 84 PASS / 0 FAIL，整段刪除同理）。同一個破口不要再犯
+  # 第三次，所以新內容當場補釘。
+  #   ci=CANCELLED / ci=BILLING_QUOTA  兩個狀態名被刪 = 規則退回只認 ABSENT，而 gate 仍對
+  #                                    三者印同一個 STATE，落差重新打開
+  #   independent Standards and Spec review  這兩個狀態額外要求的 local evidence 本體；
+  #                                    刪掉它們就變成無條件放行，比原規則還鬆
+  #   matches on the STATE field alone  刻意把 hooks/guard-pr-merge.sh 的實作事實釘進來：
+  #                                    哪天那道 hook 真的改成比對 ci=，這條會紅，逼兩邊同步。
+  #                                    這是**想要的**耦合，不是意外。
+  # 2026-08-27 mutation 矩陣（四條各自替換，逐格單獨跑）：
+  #   5 ci=CANCELED（少一個 L）              83 PASS / 1 FAIL
+  #   6 ci=QUOTA                             83 PASS / 1 FAIL
+  #   7 independent review（拿掉兩軸）       83 PASS / 1 FAIL
+  #   8 matches on STATE alone               83 PASS / 1 FAIL
+  #   NEG deliberately narrow allowance      84 PASS / 0 FAIL
+  ([.autoMode.hard_deny[] | select(test("ci=CANCELLED"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(test("ci=BILLING_QUOTA"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(test("independent Standards and Spec review"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(test("matches on the STATE field alone"))] | length >= 1) and
   # allow[5] 的 ~/.agents/bin/pr-review-gate 排除條款：該路徑在 sandbox.allowWrite 內、
   # 無 denyWrite、目錄名非 .claude 故 built-in protected-path check 不適用，classifier 是
   # unsandboxed retry 路徑上唯一的 gate，而它 gate 的正是 hard_deny[1] 點名的 merge gate。

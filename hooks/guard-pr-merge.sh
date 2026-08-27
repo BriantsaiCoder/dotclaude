@@ -401,10 +401,24 @@ cd "$CWD" || deny "[T0-9] 無法切換到執行目錄（${CWD}），pr-review-ga
 # 而理由看起來像 gate 不通過。兩個 pattern 的成本是一行，不值得省。
 # 2026-08-06 Copilot 於 PR #16 指出。
 #
-# PASS_NO_CI 是 gate 確定 CI run 根本沒被建立時的降級狀態（不是「還在跑」——那仍是 WAIT_CI）。
+# PASS_NO_CI 是 gate 拿不到 CI 結論時的降級狀態（不是「還在跑」——那仍是 WAIT_CI）。
 # 它放寬的只有「CI 必須驗過」這一項；unresolved 必須為 0、review 必須對到 current head 這些
-# 條件在 gate 那邊一項都沒鬆。接受它是三層明示的其中一層，另外兩層是 gate 自己回報
-# ci=ABSENT，以及 settings.json 的 hard_deny 也必須明寫接受。任何一層沒改就不會放行。
+# 條件在 gate 那邊一項都沒鬆。
+#
+# **這道 case 看不到 ci=,別以為它分得出來**（2026-08-27 更正）。原註解寫「接受它是三層明示
+# 的其中一層，另外兩層是 gate 自己回報 ci=ABSENT，以及 settings.json 的 hard_deny 也必須明寫
+# 接受。任何一層沒改就不會放行」——那句話**不成立**，而且是把不存在的一層算進來：
+#   * gate 對 **三種** ci 值都印同一個 STATE=PASS_NO_CI（pr-review-gate:453 的
+#     ci=BILLING_QUOTA 分支，以及 :480 的 ABSENT|CANCELLED|BILLING_QUOTA 分支）。
+#   * 下面的 case 只比對 STATE= 前綴，ci= 落在 "STATE=PASS_NO_CI "* 的萬用字元裡，
+#     三者一律 exit 0。所謂「gate 自己回報 ci=ABSENT」從來沒有被任何程式碼讀取過。
+# 於是真正能區分三者的只剩 settings.json 的 hard_deny[1]——那是 classifier prose，不是
+# 機械攔截。ci=CANCELLED 與 ci=BILLING_QUOTA 要求的額外 local evidence 寫在那裡。
+#
+# 為什麼不在這裡改成比對 ci=：那會把 review-triage.md 第 2 節整套 fallback 條件搬進本 hook
+# （full local CI-equivalent、independent 兩軸 review、0 unresolved），而其中沒有一項是
+# hook 查得到的——它只有 gate 的一行輸出。硬做只會變成比對一個無法驗證的自我宣稱。
+# 要機械化得先讓 gate 把那些條件的證據帶進輸出，屬 ~/.agents 的改動，不在本檔範圍。
 OUT=$("$GATE" "$PR" 2>&1) || true
 case "$OUT" in
   "STATE=PASS "*|"STATE=PASS")             exit 0 ;;
