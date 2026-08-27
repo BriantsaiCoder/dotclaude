@@ -830,6 +830,9 @@ _merge_probe deny  'STATE=PASS_NO_CI pr=42 x=1\tci=ABSENT ci=BILLING_QUOTA' \
   '混用 tab 與空白時不得繞過政策值' '第一行混用了 tab'
 _merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc ci=BILLING_QUOTA ci=RUNNER_OUTAGE review=CURRENT' \
   '授權值與未知值同行時保守拒絕' '一個以上的 ci= 欄位'
+# 同 push_probe_dir 的慣例（本檔下方 rm -rf 那一行）：探針目錄用完即清，否則本機反覆
+# 跑會在 TMPDIR 累積。CI 每次都是新 runner 所以看不出來，這是本機才會顯現的洩漏。
+[ -z "$merge_probe_dir" ] || rm -rf "$merge_probe_dir"
 
 # guard-s5-ledger 同理：它自帶 selftest（含 SIGPIPE 競態回歸），但註冊上線時沒有
 # 任何東西呼叫它。這支的失效模式是靜默 fail-open——PreToolUse 只有 exit 2 阻擋，任何
