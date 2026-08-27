@@ -26,20 +26,30 @@ jobs:
       # apt-get update 回 100；原本的 `&&` 於是讓整步死掉，後面兩步 skipped——
       # 2026-08-27 run 33035176589 就是這樣紅的（packages.microsoft.com 兩個 repo
       # 同時 403），那次 run 對 repo 內容零訊號：不是檢查發現問題，是檢查沒機會跑。
-      # update 部分失敗仍會刷新其他 repo 的索引，所以續行。守衛改由下面的 command -v
-      # 承擔：要保證的是工具在不在，而 update 的 exit code 反映的是「所有 apt repo
+      # update 失敗仍會刷新其他 repo 的索引，所以續行。守衛改由下面的迴圈承擔：
+      # 要保證的是工具在不在，而 update 的 exit code 反映的是「所有 apt repo
       # 都健康」——那是個更嚴格、且與本 repo 無關的條件，拿它當守衛就是誤擋。
-      - name: 安裝 shellcheck 與 ripgrep
+      # install 本身仍是致命的，只有 update 被降級。
+      #
+      # 兩個工具缺席的後果不同，2026-08-27 於本 repo 實測（不記數字，理由同上一段）：
+      #   缺 ripgrep    → suite 已經會紅。第 4 節上方的 rg 可用性檢查自 19a2256
+      #                   （2026-08-03）起 fail-closed，晚於 run 30671830610。
+      #                   這裡擋它是 defence-in-depth，並讓訊息指名工具，而不是
+      #                   讓人從一堆 FAIL 斷言裡回推工具沒裝。
+      #   缺 shellcheck → suite 仍然是綠的。第 4 節印 SKIP 不印 FAIL，覆蓋率靜默
+      #                   流失而沒有人會發現——這才是本步驟真正堵住的洞。
+      - name: 工具就緒
         run: |
           set -euo pipefail
-          sudo apt-get update -qq || echo "apt-get update 部分失敗，續行（見上方註解）"
+          sudo apt-get update -qq || echo "apt-get update 失敗，續行（見上方註解）"
           sudo apt-get install -y -qq shellcheck ripgrep
-          # 兩條都是硬擋，缺一不可。兩者缺席的失效方式不同，但都會表現成「綠」：
-          # shellcheck 缺席 → repo-integrity.sh 第 4 節印 SKIP 而非 FAIL，覆蓋率靜默流失；
-          # rg 缺席 → 依斷言極性半數假 PASS（同上 run 30671830610）。
-          # 也就是 install 靜默少裝一個，整條 pipeline 仍會綠——所以在這裡先擋掉。
-          command -v shellcheck
-          command -v rg
+          # 逐項硬擋並指名缺哪一個。沉默的 exit 1 正是本次要消滅的失效樣態，
+          # 同一個 job 下方的守衛步驟也是每條失敗路徑都 echo 理由。
+          # command -v 不重導向：成功時把解析到的路徑印進 log，那是這一步唯一的
+          # provenance 訊號（工具究竟來自 apt 還是 runner image 預裝）。
+          for t in shellcheck rg; do
+            command -v "$t" || { echo "缺少 $t——CI 覆蓋率會靜默流失，見上方註解"; exit 1; }
+          done
 
       # step 名稱不複述檢查項目，同上理由——檢查了什麼由腳本自己的輸出負責。
       - name: repo 完整性
