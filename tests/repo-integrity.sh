@@ -1044,6 +1044,38 @@ jq -e '
   # 授權句 anchor：釘住「指名」這個限定詞。把它弱化成 `Any user instruction, however
   # general,`（或整句刪除）時，上面三條都抓不到，只有這條會紅。
   ([.autoMode.hard_deny[] | select(test("naming the specific change"))] | length >= 1) and
+  # ── hard_deny[1]（merge gate）的 anchor，2026-08-27 補 ─────────────────────────
+  # 上面四條全部釘在談 settings.json 的那條（現為 hard_deny[3]）。merge gate 那條
+  # （hard_deny[1]）自己**零覆蓋**：2026-08-27 mutation 實測 del(.autoMode.hard_deny[1])
+  # → 84 PASS / 0 FAIL，一條都沒紅。整條「未經 pr-review-gate PASS 不得 merge」可以被
+  # 一次編輯刪掉而 CI 全綠——與本區塊開頭對 hard_deny[3] 的警告是同一個破口，當時只補了
+  # 其中一條。
+  #
+  # 釘四個片語，各對應該規則的一個獨立構成要件，任一被字面刪除都紅：
+  #   1. 禁令極性     Never merge a pull request unless
+  #   2. gate 身分    pr-review-gate reported STATE=PASS（工具名＋要求的狀態）
+  #   3. 新鮮度       at the current head SHA in this session
+  #   4. 封閉性       every other STATE remains forbidden
+  # 第 4 條最要緊：沒有它，把描述放寬成「PASS 開頭的狀態都算」不會被察覺，而 gate 對
+  # PASS_NO_CI 刻意回非 0 exit code，正是要逼呼叫端明確認得那個字串。
+  #
+  # 刻意**不**釘 `no CI run was ever created`：那句與
+  # ~/.agents/skills/dev-workflow/references/review-triage.md 第 2 節不同步（見下方
+  # 2026-08-27 的紀錄），本身是待裁決對象。拿待改的句子當 anchor，會讓修正它的那個
+  # commit 被自己的守衛擋下。
+  #
+  # 上限與上面同源：substring anchor 抓字面刪除與替換，不抓語意；加字仍可繞過。
+  # 2026-08-27 mutation 矩陣（四條各自替換成同義改寫，逐格單獨跑）：
+  #   1 Merge a pull request only if       83 PASS / 1 FAIL
+  #   2 pr-review-gate returned STATE=PASS 83 PASS / 1 FAIL
+  #   3 at the head SHA in this session    83 PASS / 1 FAIL
+  #   4 all other states remain forbidden  83 PASS / 1 FAIL
+  #   NEG deliberately narrow allowance    84 PASS / 0 FAIL（無關改寫不誤擋）
+  # 四條各自承重，不是彼此的備份。
+  ([.autoMode.hard_deny[] | select(test("Never merge a pull request unless"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(test("pr-review-gate reported STATE=PASS"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(test("at the current head SHA in this session"))] | length >= 1) and
+  ([.autoMode.hard_deny[] | select(test("every other STATE remains forbidden"))] | length >= 1) and
   # allow[5] 的 ~/.agents/bin/pr-review-gate 排除條款：該路徑在 sandbox.allowWrite 內、
   # 無 denyWrite、目錄名非 .claude 故 built-in protected-path check 不適用，classifier 是
   # unsandboxed retry 路徑上唯一的 gate，而它 gate 的正是 hard_deny[1] 點名的 merge gate。
@@ -1141,6 +1173,27 @@ jq -e '
   # 只動 index／objects／refs，不受影響）。
   # 上限：與上一條同為字面枚舉，寫成 /Users/pochientsai/... 等效拼法會誤紅——與既有三條
   # denyWrite 斷言同慣例，不另立形狀。
+  # 2026-08-27：把 .git/config 的**兄弟路徑**評估完，結論是不加第三條。實測三項——
+  #   touch .git/config.lock       rc=0（可寫）
+  #   touch .git/config.worktree   rc=0（可寫）
+  #   git config --local k v       error: could not write config file .git/config:
+  #                                Operation not permitted，rc=4，且 git 自己清掉了 lock
+  # 兩個兄弟檔可寫但都不構成繞道：
+  #   * config.lock 只是鎖，寫它設不了任何 key，效果只有阻斷後續合法的 config 寫入
+  #     （本次探針就自己撞上一次：先 touch 出 lock，隨後那輪 git config 回的是
+  #     "could not lock config file: File exists" 而非權限錯，差點把結論讀反）。
+  #     把它加進 denyWrite 沒有安全收益——config 本身已經擋死了。
+  #   * config.worktree 只在 .git/config 裡 extensions.worktreeConfig=true 時才被 git 讀取
+  #     （現況：git config --get extensions.worktreeConfig rc=1，未啟用）。要啟用得先寫
+  #     config，而那正是被擋住的動作。所以它是一扇通往已鎖房間的門。
+  # 不加的另一個理由是改動成本不對稱：多一條就得改 hard_deny[3] 裡「That enumeration is
+  # exhaustive on purpose … both execute code」那句，而那正是 2026-08-26 被一次 mid-sentence
+  # Edit 把語意改成 `.git/config … allowed` 的同一句。收益為零的改動不值得碰它。
+  #
+  # 順帶更正一則舊紀錄：曾記「hard_deny[3] 的 CLAUDE.md and hooks/ rely on sandbox
+  # denyWrite 一句在收斂 allowWrite 後不再準確」——**錯**。denyWrite 現含
+  # ~/.claude/CLAUDE.md、~/.claude/hooks、~/.claude/core 三條，tests/hooks.sha256 也在
+  # （1215 B），該句逐項成立，無須改。
   (.sandbox.filesystem.denyWrite | index("~/.claude/.git/config") != null)
 ' settings.json >/dev/null || perm_ok=0
 if [ "$perm_ok" -eq 1 ]; then
@@ -1160,6 +1213,13 @@ fi
 # ~/.claude/rules/ 刻意不在此列（它們是內容，由 $defaults Self-Modification 承接），
 # 不要「補齊」它們：denyWrite 沒有「除非使用者要求」的逃生口，會把合法編輯一起鎖死。
 # 上限：這是 sandbox-scoped，unsandboxed retry 時降級為 classifier 判定而非硬擋。
+# 2026-08-27：「這幾條 denyWrite 是否條條承重」這個待辦**不做**，理由記在這裡以免有人
+# 再撿起來。要證明某條承重，得把它拿掉再探針——那是 hard_deny[3] 明文禁止的 widening，
+# 而且拿掉的正好是 gate 本體所在的路徑。就算願意承擔，量測也不成立：sandbox 設定在
+# session 內有快取，改了不會對當前 session 生效、切回去也不恢復，於是 before/after 探針
+# 量的是同一個舊狀態，只會產出一個看起來很綠的假結論。原待辦寫的是「四條」，現在是九條，
+# 條目本身也已過期。真要建立承重性，正確形狀是新開一個 session 對單一條目做一次性驗證，
+# 不是在既有 session 裡連續 ablate。
 gate_paths_ok=1
 jq -e '
   (.sandbox.filesystem.denyWrite | index("~/.claude/core") != null) and
