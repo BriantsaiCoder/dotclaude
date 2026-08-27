@@ -729,6 +729,78 @@ if [ -f hooks/guard-pr-merge.sh ]; then
   fi
 fi
 
+# 跨檔 tripwire：本檔**直接驅動** hook，自己斷言 ci= 三態的決策。
+#
+# 為什麼上面那條不夠：它只呼叫 hook 自帶的 --selftest，而那些斷言與它們守的邏輯
+# 同在一個檔案裡。把 hooks/guard-pr-merge.sh 整檔還原到分流之前，斷言會被一起帶走；
+# 再依本檔 FAIL 訊息印出的指令重生 tests/hooks.sha256，整套就是 85 PASS / 0 FAIL
+# 全綠，而 settings.json 仍宣稱 hook 會機械分流。S5 round 1 與 round 2 兩軸各自
+# 實測過這條路徑。只還原 case 區塊（斷言留著）則是 83 PASS / 2 FAIL，抓得到——
+# 抓不到的一直是**整檔**還原。
+#
+# 下面這幾條寫在本檔，所以還原 hook 不會連帶還原它們：整檔還原後 ci=ABSENT 與
+# ci=CANCELLED 會變回放行，這裡就紅。這是唯一能守住那個方向的形狀。
+# 探針形狀沿用同檔上方 _push_probe 的慣例，不另立一套。
+merge_probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || merge_probe_dir=""
+_guard_merge_abs="$PWD/hooks/guard-pr-merge.sh"
+_merge_probe() { # $1=allow|deny $2=gate 印的第一行 $3=說明 [$4=deny 理由必含片語]
+  local want="$1" line="$2" desc="$3" need="${4:-}" rc actual
+  [ -n "$merge_probe_dir" ] ||
+    { bad "pr-merge 守衛無法建立探針目錄"; return; }
+  mkdir -p "$merge_probe_dir/repo"
+  printf '#!/bin/sh\nprintf %%b %s\n' "'$line\n'" > "$merge_probe_dir/gate"
+  chmod +x "$merge_probe_dir/gate"
+  # fixture 有效性：gate 建不起來時 hook 走「找不到 pr-review-gate」，那也是 exit 2，
+  # 於是每個 deny 案例都會假 PASS。這道檢查讓 fixture 壞掉表現為紅而不是綠。
+  if [ ! -x "$merge_probe_dir/gate" ] || [ -z "$("$merge_probe_dir/gate" 42)" ]; then
+    bad "pr-merge 守衛探針 fixture 無效（fake gate 不可執行或無輸出）: $desc"; return
+  fi
+  if jq -nc --arg cmd 'gh pr merge 42' --arg cwd "$merge_probe_dir/repo" \
+       '{tool_input:{command:$cmd},cwd:$cwd}' |
+     PR_REVIEW_GATE="$merge_probe_dir/gate" bash "$_guard_merge_abs" \
+       >"$merge_probe_dir/stdout" 2>"$merge_probe_dir/stderr"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -eq 0 ] && [ ! -s "$merge_probe_dir/stderr" ]; then
+    actual=allow
+  elif [ "$rc" -eq 2 ] && [ -s "$merge_probe_dir/stderr" ] &&
+    jq -se 'length == 1 and .[0].decision == "block"' \
+      "$merge_probe_dir/stderr" >/dev/null 2>&1; then
+    actual=deny
+  elif [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
+    actual=BADOUTPUT
+  else
+    actual="BADEXIT($rc)"
+  fi
+  if [ "$actual" != "$want" ]; then
+    bad "pr-merge 守衛 want=$want got=$actual rc=$rc: $desc"
+    return
+  fi
+  # deny 的理由必須能分辨政策拒絕與格式漂移。只驗 exit code 的話，把政策分支整個
+  # 刪掉、讓 ci=ABSENT 落到「缺欄」分支也是 exit 2，這裡完全看不出來。
+  if [ -n "$need" ] &&
+    ! jq -se --arg want "$need" '.[0].reason | index($want) != null' \
+        "$merge_probe_dir/stderr" >/dev/null 2>&1; then
+    bad "pr-merge 守衛 deny 理由未含「${need}」: $desc"
+    return
+  fi
+  ok "pr-merge 守衛 ${want}: $desc"
+}
+_merge_probe allow 'STATE=PASS pr=42 head=abc ci=SUCCESS review=CURRENT unresolved=0' \
+  'STATE=PASS'
+_merge_probe allow 'STATE=PASS_NO_CI pr=42 head=abc ci=BILLING_QUOTA review=CURRENT unresolved=0' \
+  'ci=BILLING_QUOTA（額度用盡是唯一被授權的降級）'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc ci=ABSENT review=CURRENT unresolved=0' \
+  'ci=ABSENT（CI 該跑而沒跑）' '不授權合併的降級狀態'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc ci=CANCELLED review=CURRENT unresolved=0' \
+  'ci=CANCELLED（CI 該跑而沒跑）' '不授權合併的降級狀態'
+_merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc review=CURRENT unresolved=0' \
+  'PASS_NO_CI 但無 ci= 欄' '沒有可辨識的 ci= 欄位'
+_merge_probe deny  'STATE=FAIL_CI pr=42 head=abc review=CURRENT unresolved=0' \
+  'STATE=FAIL_CI'
+
 # guard-s5-ledger 同理：它自帶 selftest（含 SIGPIPE 競態回歸），但註冊上線時沒有
 # 任何東西呼叫它。這支的失效模式是靜默 fail-open——PreToolUse 只有 exit 2 阻擋，任何
 # 意外的 exit 1 都等於放行——沒接線就沒有東西會發現它退化。
@@ -1140,7 +1212,8 @@ jq -e '
   #
   # 上限與上面同源，但要說準（前一版說得太寬）：抓的是**被釘的那幾個片語**的字面刪除與
   # 替換，不是「字面刪除」一般。未被釘的整句照樣可以整段刪掉而全綠——S5 round 2 逐格實測，
-  # 以下五種刪除各自 84 PASS / 0 FAIL：hard_deny[1] 的
+  # 以下各種刪除各自 84 PASS / 0 FAIL（不寫項數：註解一複述可枚舉的數量就會漂移，
+  # 前一版寫「五種」而列出的是四項）：hard_deny[1] 的
   # `Never merge when CI is pending…` 整句、`; hosted CI stays UNAVAILABLE…` 整段子句；
   # hard_deny[2] 的 `, and never delete releases or tags`；hard_deny[3] 的
   # `Route every settings.json change through the Edit tool…` 整句。
@@ -1244,8 +1317,10 @@ jq -e '
   #                                    所以正確的說法是「**部分**還原抓得到」，不是「反向那一側
   #                                    由 selftest 與指紋負責」。本段前一版就是後者，已被實測
   #                                    推翻。要堵整檔還原，唯一有效的形狀是在**本檔**用假 gate
-  #                                    實跑一次 hook 並斷言 ci=ABSENT 被擋——那是本檔之外的
-  #                                    斷言，不會跟著 hook 一起被還原。尚未實作，列為 follow-up。
+  #                                    實跑一次 hook 並斷言 ci=ABSENT 被擋——那是 hook 之外的
+  #                                    斷言，不會跟著它一起被還原。2026-08-27 已實作，見本檔
+  #                                    pr-merge 守衛 selftest 那段下方的 _merge_probe。加上之後
+  #                                    整檔還原 + 重生指紋是 88 PASS / 3 FAIL，不再全綠。
   # 這四條的實測結果併入上方那張逐 anchor 矩陣（A6～A9 欄），此處不重複。
   # A9 那一列的標籤已隨本次改名更新為新片語；其突變仍是「把該片語從 settings.json 刪掉」，
   # 與改名前同型，故沿用原本量到的 84/1，未重新量測的部分只有標籤本身。
