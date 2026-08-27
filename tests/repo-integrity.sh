@@ -669,7 +669,11 @@ _no_tempfile_redirect() { # $1=守衛檔
     bad "守衛仍有 here-doc／here-string（上列），/tmp 與 cwd 皆不可寫時會 fail-open: $1"
   fi
 }
-for _g in hooks/guard-git-push.sh hooks/guard-pr-merge.sh hooks/guard-cookbook-orphan.sh hooks/guard-s5-ledger.sh; do
+# 2026-08-26 補入 pre-commit-claude.sh：它同樣是阻擋型 gate、同樣受此缺陷影響，卻不在
+# 原清單內——所以三個 here-string 在這條斷言鎖死同一缺陷 18 天後仍然存活。判準因此從
+# 「host 註冊的 PreToolUse 攔截器」放寬為「阻擋型 gate」。實測：把修前的版本餵給本函式
+# 會命中三行並報紅，修後 PASS，鑑別力完整。
+for _g in hooks/guard-git-push.sh hooks/guard-pr-merge.sh hooks/guard-cookbook-orphan.sh hooks/guard-s5-ledger.sh hooks/pre-commit-claude.sh; do
   [ -f "$_g" ] && _no_tempfile_redirect "$_g"
 done
 
@@ -1147,6 +1151,56 @@ else
     bad "hooks 內容或檔案集合與 tests/hooks.sha256 不符（上列為差異）。改動後請同步更新：cd hooks && shasum -a 256 -- *.sh *.py | sort -k2 > ../tests/hooks.sha256"
   fi
 fi
+
+# ── 安裝過的 pre-commit 必須與 repo 來源一致 ────────────────────────────────────
+# 上面那道指紋只釘 hooks/，不涵蓋 .git/hooks/。兩者可以無聲脫鉤：改了 hooks/ 卻忘了重跑
+# install-pre-commit.sh，指紋全綠而**實際執行的是舊版**。2026-08-26 實測就撞到——安裝過的
+# 那份落後 repo 一版（差一行文案），沒有任何守衛發現。
+# 這條只在本機有意義：.git/hooks/ 不進版控，CI 的 fresh clone 沒有它，故缺檔時 SKIP 而非 FAIL。
+# **exec bit 與內容同等承重**：git 對非 executable 的 hook 是靜默跳過（只有一行可被
+# advice.ignoredHook 關掉的 hint），gate 等於沒在跑。只比 cmp 會在這種情況報綠——
+# 2026-08-26 實測：把安裝檔 chmod 644 後，「逐 byte 一致」PASS、83 PASS / 0 FAIL，
+# 而同時 staged 的黑名單檔照樣 commit 成功（rc=0）。那正是本斷言要抓的 failure class。
+# 這與上方 2026-08-08 那條 exec-bit 斷言是同一個教訓；該條的清單推導自 settings.json 的
+# hook 註冊，而 .git/hooks/pre-commit 是 git hook、不在註冊表內，故無人涵蓋。
+# 上限：只比對 pre-commit 這一支——它是本 repo 唯一在 hooks/ 有版控來源可比對的 git hook。
+#   安裝目錄下其他 hook（如 pre-push）沒有 in-repo 來源，無從比對，故不納入。
+#   刻意不指名那些檔：它們只存在於未追蹤的安裝目錄，讀者與 CI 都查證不到。
+# 缺檔的 SKIP 分支分不出「CI fresh clone」與「開發者從未安裝」，後者更危險卻不報紅——
+# 已知取捨，因為 .git/hooks/ 不進版控，沒有可靠的第三種訊號可分流。
+# 路徑用 git rev-parse --git-path 而非硬寫 .git/hooks：worktree 的 .git 是**檔案**不是目錄，
+# 硬寫會讓本斷言在 worktree 內恆走 SKIP——包括本 repo 的 review 工具鏈用的 snapshot
+# worktree，等於斷言剛好在最常用的環境裡失聲。同一個寫法也順帶處理 core.hooksPath
+# 與 ${GIT_DIR}（2026-08-26 實測 git -c core.hooksPath=/nonexist 會正確回該路徑）。
+# 不用 `|| echo .git/hooks/pre-commit` 兜底：那是 fail-open——git 不可用或這裡不是 repo 時
+# 會靜默退回硬寫路徑，接著走到 SKIP 或比對錯的目標，整條斷言失去鑑別力而全綠。
+# 本 commit 修的正是同一個病（here-string 失敗被吞掉），不該在守衛自己身上重犯。
+_hookdst=""
+_hookdst="$(git rev-parse --git-path hooks/pre-commit 2>/dev/null)" || _hookdst=""
+if [ -z "$_hookdst" ]; then
+  bad "取不到 git hooks 路徑（git rev-parse --git-path 失敗）——安裝一致性檢查失去依據。這不是 SKIP：請確認此處是 git repo 且 git 可用"
+elif [ ! -f "$_hookdst" ]; then
+  # 不用 ok()：沒驗到東西就不該計入 PASS（那正是本檔一貫反對的過度宣稱）。
+  printf '  SKIP  %s\n' "安裝過的 pre-commit 與來源一致：$_hookdst 不存在（fresh clone／CI，非錯誤）"
+elif [ ! -x "$_hookdst" ]; then
+  bad "安裝過的 $_hookdst 缺 exec bit——git 會靜默跳過（只有一行可關掉的 hint），pre-commit gate 等於沒在跑。修：chmod +x '$_hookdst'"
+else
+  # cmp 的 rc 必須分三態：0=相同、1=內容不同、>=2 才是「比不了」（檔案不可讀、cmp 不存在
+  # 而回 127…）。把 >=2 併進「內容不一致」會把排障方向指錯——這與本檔 _no_tempfile_redirect()
+  # 對 grep rc 的處置是同一條教訓（rc>=2 是錯誤，不是「無命中」）。
+  # 本檔是 set -uo pipefail（無 -e），但仍用 `|| _cmprc=$?` 明寫，不依賴那個前提。
+  _cmprc=0
+  cmp -s hooks/pre-commit-claude.sh "$_hookdst" || _cmprc=$?
+  if [ "$_cmprc" -eq 0 ]; then
+    ok "安裝過的 pre-commit 與 hooks/pre-commit-claude.sh 逐 byte 一致且可執行"
+  elif [ "$_cmprc" -eq 1 ]; then
+    bad "安裝過的 $_hookdst 與 hooks/pre-commit-claude.sh 內容不一致（哪一邊較新無法由 cmp 判斷）。重跑 bash hooks/install-pre-commit.sh 以來源為準；沙箱擋住寫入時需停沙箱"
+  else
+    bad "無法比對安裝過的 pre-commit 與來源（cmp rc=${_cmprc}，非 0／1）。這不是內容不一致——請檢查兩個檔是否可讀、cmp 是否存在：hooks/pre-commit-claude.sh 與 $_hookdst"
+  fi
+  unset _cmprc
+fi
+unset _hookdst
 
 # ── 直接 exec 的 hook 必須保有 exec bit ──────────────────────────────────────────
 #
