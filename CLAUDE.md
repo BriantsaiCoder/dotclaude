@@ -9,7 +9,7 @@ ponytail 等風格注入=通用慣例；完成度陳述與測試敘述 MUST NOT 
 
 - 預設 zh-TW；technical terms 保留 English。
 - 回覆 SHOULD outcome-first、無空泛前後文；決策列編號選項／推薦／取捨，單字或數字即為完整回答，推測標記，已決不列替案。
-- 多步任務每回合標進度；已用 todo tool 時由清單承擔重述，不再散文複誦全計畫；散文步驟給編號，上限 5 項，超過切「現在做／之後做」。
+- 多步任務每回合標進度並指名下一步；已用 todo tool 時由清單承擔重述，不再散文複誦全計畫；散文步驟給編號，上限 5 項，超過切「現在做／之後做」。
 - 時間／工作量估計用具體單位並標前提；禁「一些工作」「不用太久」這類無刻度描述。
 - 完成回報寫成可驗證動作：做了什麼 → 現在什麼能用 → 用什麼指令驗，不寫抽象摘要。
 - 送出前刪：宣告接下來要做什麼的首句、收尾客套、by-the-way 旁註（第二議題答完再提）、無資訊量 hedge、慣用語。承載真實不確定性的 hedge 保留。
@@ -31,7 +31,7 @@ Verification scope 與 risk tier 由 `~/.agents/skills/dev-workflow/SKILL.md` �
 
 ### S5 REVIEW
 
-中高風險或進 PR 的變更 MUST 跑 Standards 與 Spec 兩軸；條文 [S5-1]～[S5-4] 與 `UNAVAILABLE`（附 probe）的定義同在該 skill。缺 reviewer capability 標 UNAVAILABLE，不得以自審頂替。
+中高風險或進 PR 的變更 MUST 跑 Standards 與 Spec 兩軸；條文 [S5-1]～[S5-4] 與 `UNAVAILABLE`（附 probe）的定義同在 `dev-workflow`。缺 reviewer capability 標 UNAVAILABLE，不得以自審頂替。
 
 兩軸 findings 處理完後 MUST 跑 `simplify` 當 apply pass；該 pass 的產出如何回 S4 與 S5，依 kernel `host-adapters.md` 的 Claude 節，此處不複製。
 

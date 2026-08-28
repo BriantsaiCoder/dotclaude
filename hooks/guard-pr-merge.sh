@@ -143,7 +143,8 @@ if [ "${1:-}" = "--selftest" ]; then
   # 自稱就是要接格式漂移。
   run 'ci=BILLING_QUOTA 在行尾仍放行' 'gh pr merge 42'            PASS_NO_CI  0 ' review=CURRENT ci=BILLING_QUOTA'
   run 'ci=ABSENT 在行尾擋且理由講政策' 'gh pr merge 42'           PASS_NO_CI  2 ' review=CURRENT ci=ABSENT' '不授權合併的降級狀態'
-  # 以下三組驗的是**整行形狀**，run() 的固定 gate 形狀表達不了，改用 runraw。
+  # 以下這組驗的是**整行形狀**，run() 的固定 gate 形狀表達不了，改用 runraw。
+  # 不寫組數（前一版寫「三組」而實際是四組，2026-08-28 S5 指出）。
   #
   # (1) ci= 緊接 STATE：欄位之間只有一個空白，若把狀態與 ci= 寫成同一層 case pattern，
   #     狀態那半會把分隔空白吃掉，ci= 就沒有前導空白可比對。實測此形狀在一層寫法下被
@@ -383,23 +384,37 @@ if [ "${1:-}" = "--selftest" ]; then
   # 也就是說沒有這三條，把 GATE_RC 那段整個刪掉不會有任何測試轉紅。三條各自釘一件事：
   # 矛盾要擋、不矛盾不能誤擋、12 是 PASS_NO_CI 的正確值而非「任何非 0」。
   # 直接寫 fake gate 而不走 run／runraw：那兩個生成器固定 exit 0，要讓它們模擬 exit code
-  # 就得改介面，而它們是其餘 74 條賴以運作的 fixture 來源。
-  rc_probe() { # $1=label $2=gate-stdout $3=gate-exit $4=want(block|allow)
+  # 就得改介面，而它們是本檔多數案例賴以運作的 fixture 來源（不寫條數，理由同 :115；
+  # 而且「走 generator 的」與「非 rc_probe 的」不是同一個集合——另有數條自建 gate 的
+  # inline 區塊兩者皆非）。
+  # block 的案例比對 deny 訊息而不只看 exit status，理由同本檔 :232 那組：純看 exit code
+  # 分不出「是這道檢查擋的」還是「別的地方擋的」，而本檔的每一條 deny 都刻意帶不同的理由。
+  # 用 `2>&1 >/dev/null`（順序不可顛倒）只取 stderr——deny 的 JSON 印在那裡。
+  rc_probe() { # $1=label $2=gate-stdout $3=gate-exit $4=want(block|allow) $5=block 時期望的理由片段
+    local out rc
     printf '#!/bin/sh\nprintf %%b %s\nexit %s\n' "'$2'" "$3" > "$d/gate"
     chmod +x "$d/gate"
-    if printf '%s' '{"tool_input":{"command":"gh pr merge 42"},"cwd":"/tmp"}' |
-         PR_REVIEW_GATE="$d/gate" "$0" >/dev/null 2>&1; then
+    out=$(printf '%s' '{"tool_input":{"command":"gh pr merge 42"},"cwd":"/tmp"}' |
+          PR_REVIEW_GATE="$d/gate" "$0" 2>&1 >/dev/null); rc=$?
+    if [ "$rc" -eq 0 ]; then
       if [ "$4" = allow ]; then printf '  PASS  %s\n' "$1"; p=$((p+1))
       else printf '  FAIL  %s（期望擋下，實得放行）\n' "$1"; f=$((f+1)); fi
+    elif [ "$4" != block ]; then
+      printf '  FAIL  %s（期望放行，實得擋下：%s）\n' "$1" "$out"; f=$((f+1))
     else
-      if [ "$4" = block ]; then printf '  PASS  %s\n' "$1"; p=$((p+1))
-      else printf '  FAIL  %s（期望放行，實得擋下）\n' "$1"; f=$((f+1)); fi
+      case "$out" in
+        *"$5"*) printf '  PASS  %s\n' "$1"; p=$((p+1)) ;;
+        *)      printf '  FAIL  %s（擋下了，但理由不是預期的那一道：%s）\n' "$1" "$out"; f=$((f+1)) ;;
+      esac
     fi
   }
-  rc_probe 'STATE=PASS 但 exit 20 時不放行' 'STATE=PASS pr=42 head=abc\n' 20 block
+  rc_probe 'STATE=PASS 但 exit 20 時不放行' 'STATE=PASS pr=42 head=abc\n' 20 block 'exit code 是 20'
   rc_probe 'STATE=PASS 且 exit 0 時放行'    'STATE=PASS pr=42 head=abc\n' 0  allow
   rc_probe 'PASS_NO_CI 的正確 rc 是 12'     'STATE=PASS_NO_CI pr=42 head=abc ci=BILLING_QUOTA\n' 12 allow
-  rc_probe 'PASS_NO_CI 配 exit 30 時不放行' 'STATE=PASS_NO_CI pr=42 head=abc ci=BILLING_QUOTA\n' 30 block
+  rc_probe 'PASS_NO_CI 配 exit 30 時不放行' 'STATE=PASS_NO_CI pr=42 head=abc ci=BILLING_QUOTA\n' 30 block 'exit code 是 30'
+  # rc 檢查在放行點而不在 case 之前，所以 ci= 的政策判定先發言。這條釘住那個順序：把
+  # rc_allows 搬回 case 前面的話，理由會變成 rc 矛盾，而維護者該去查的是 CI 為什麼沒跑。
+  rc_probe 'ci= 不授權時理由指向 ci= 而非 rc' 'STATE=PASS_NO_CI pr=42 head=abc ci=ABSENT\n' 20 block '不授權合併的降級狀態'
 
   printf '總計：PASS=%s FAIL=%s\n' "$p" "$f"
   [ "$f" -eq 0 ]
@@ -679,18 +694,28 @@ PAD=" $LINE1 "
 # 11=WAIT_READY/REQUESTED/WAIT_REVIEW、20=FINDINGS、30=UNAVAILABLE/FAIL_*、64=usage。
 #
 # 刻意只驗**一個方向**：rc 明確表示不通過，stdout 卻宣稱可放行。反方向（rc 是 0 或 12 卻
-# 印出不可放行的狀態）不驗——那個組合的判定權仍歸 stdout，加驗只會讓 selftest 的 fake
-# gate 全部得跟著模擬 exit code，而那是 74 條測試賴以運作的 fixture 生成器，動它的風險
-# 遠大於這半邊的收益。今天所有 fake gate 都 exit 0，所以這道檢查對它們是 no-op。
+# 印出不可放行的狀態）不驗——那個組合的判定權仍歸 stdout，而且它已經是 fail-closed：下面
+# 那個 case 的最後一條 arm 擋掉一切非放行狀態，與 rc 無關。加驗反方向只會讓 selftest 的
+# fake gate 全部得跟著模擬 exit code，而那是既有案例賴以運作的 fixture 生成器（要知道有
+# 幾條就自己數走 run／runraw 的案例），動它換不到任何安全增益。
 #
-# 涵蓋 127（gate 不存在／不可執行）與任何未列出的 rc：只要不是 0 或 12，宣稱放行就矛盾。
-if [ "$GATE_RC" -ne 0 ] && [ "$GATE_RC" -ne 12 ]; then
-  case "$PAD" in
-    " STATE=PASS "*|" STATE=PASS_NO_CI "*)
-      deny "[T0-9] gate 輸出宣稱 ${LINE1%% *} 但 exit code 是 ${GATE_RC}（0=PASS、12=PASS_NO_CI）。兩者矛盾時不放行。gate 原文：${LINE1}"
-      ;;
+# 今天所有 fake gate 都 exit 0，所以這道檢查對它們是 no-op；它自己的守衛是下方的 rc_probe。
+#
+# 對真實 gate 而言這條目前也不可達——2026-08-28 逐個列舉 pr-review-gate 的退出路徑，沒有
+# 任何一條會印出 PASS／PASS_NO_CI 卻以 0／12 以外的 rc 收場。它防的是未來的漂移，而且那個
+# 漂移比看起來更容易發生：gate 的 PASS 路徑**沒有明確的 exit 0**，狀態繼承自結尾 printf，
+# 在檔尾多加一行語句就會讓每一次合法 merge 被擋。真正的修法在 producer 側（見 PR body 的
+# follow-up），這裡保留為 defence in depth。
+#
+# 不宣稱涵蓋 127：實測兩種造成 127 的成因都走不到這裡——gate 不存在或不可執行時，上方的
+# `[ -x "$GATE" ]` 先擋；shebang 壞掉時 stdout 帶著直譯器的錯誤訊息，pattern 比不中而落到
+# 最後那條 arm。兩者都 fail-closed，只是理由不同。
+rc_allows() { # 放行前的最後一道：gate 的 rc 必須與「可放行」相容
+  case "$GATE_RC" in
+    0|12) return 0 ;;
   esac
-fi
+  deny "[T0-9] gate 輸出宣稱 ${LINE1%% *} 但 exit code 是 ${GATE_RC}（0=PASS、12=PASS_NO_CI）。兩者矛盾時不放行。gate 原文：${LINE1}"
+}
 
 # 狀態與 ci= 分成兩層比對，不寫成 `" STATE=X "*" ci=Y "*` 這種一層的形式：欄位之間
 # 只有**一個**空白，一層寫法會讓 STATE 的 pattern 把那個空白吃掉，ci= 就沒有前導空白
@@ -698,7 +723,7 @@ fi
 # review-triage.md 第 2 節記載的形狀）在一層寫法下被誤擋。內層對整個 PAD 重新比對，
 # 分隔空白不再被兩個 token 爭用。
 case "$PAD" in
-  " STATE=PASS "*) exit 0 ;;
+  " STATE=PASS "*) rc_allows; exit 0 ;;
   " STATE=PASS_NO_CI "*)
     # 含 tab 的行先擋掉，而且必須在良構迴圈**之前**。迴圈用 IFS 切詞（空白**加** tab），
     # 所以 `x=1<TAB>ci=ABSENT` 會被切成兩個都含等號的 token 而取得「良構」資格；但下面的
@@ -747,7 +772,7 @@ case "$PAD" in
       # 時會走放行，與本檔自述的保守優先不一致。
       *" ci="*" ci="*)
         deny "[T0-9] gate 回報 PASS_NO_CI，但第一行有一個以上的 ci= 欄位，無法判定以哪個為準，保守拒絕。pr-review-gate #$PR 回報：$LINE1" ;;
-      *" ci=BILLING_QUOTA "*) exit 0 ;;
+      *" ci=BILLING_QUOTA "*) rc_allows; exit 0 ;;
       # ci= 欄在、值不是已知三者之一。與下面那條的差別是**診斷**：這裡欄位好好的，
       # 是 gate 多了一個本規則沒涵蓋的降級理由；下面那條才是欄位不見了。兩者都 deny，
       # 但叫維護者去查的東西不同。
