@@ -236,10 +236,27 @@ else
 fi
 
 # ── 6. Matt thin kernel ────────────────────────────────────────
-if [ "$(wc -c < CLAUDE.md | tr -d ' ')" -le 5000 ]; then
+# 硬閘之外另設軟閘，理由是 2026-08-28 實測到的狀態：CLAUDE.md 當時 4979B、硬閘 5000B，
+# 餘裕 21B——下一次改 anchor 或加一行條文就直接撞硬閘，而硬閘沒有預警，只會在 PR 當下
+# 才紅。另兩家 host 早就是兩層（Codex `-le 5000` + `-lt 4750`、Copilot `-le 4000` +
+# `-lt 3800`，都是 95%），只有 Claude 這邊缺，三家因此不一致。
+#
+# 補軟閘的同時把 CLAUDE.md 瘦到 4644B（刪的是自明的例子與 tier0 已列舉的類別，不減
+# 語意），餘裕 106B，與 Codex 的 110B、Copilot 的 109B 同一量級。
+#
+# 兩者都是 FAIL 不是 warning：軟閘的作用是在還有空間時就逼人處理，而不是等撞上設計上限
+# 才發現。失敗訊息帶實際 byte 數，因為「超過了多少」是決定要瘦身還是要重新檢視上限的依據。
+_claude_md_bytes=$(wc -c < CLAUDE.md | tr -d ' ')
+if [ "$_claude_md_bytes" -le 5000 ]; then
   ok "CLAUDE.md thin budget <= 5000B"
 else
-  bad "CLAUDE.md 超過 thin budget"
+  bad "CLAUDE.md 超過 thin budget（${_claude_md_bytes}B）"
+fi
+
+if [ "$_claude_md_bytes" -lt 4750 ]; then
+  ok "CLAUDE.md 在軟閘之內"
+else
+  bad "CLAUDE.md 已越過軟閘（${_claude_md_bytes}B）：距硬閘所剩無幾，先瘦身或重新檢視上限，不要等撞硬閘"
 fi
 
 if rg -q '^@~/.claude/core/tier0-safety\.md$' CLAUDE.md &&
