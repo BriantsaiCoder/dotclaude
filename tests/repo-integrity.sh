@@ -360,9 +360,10 @@ else
   }
   # mktemp 失敗不能 exit——那會跳過下面的總結與「至少跑到了」自證，讓整份測試靜默短路。
   #
-  # template 不可省（本檔七處皆同）：macOS 的 mktemp 在沒有 template 時走
-  # confstr(_CS_DARWIN_USER_TEMP_DIR)（/var/folders/…/T/）而**忽略 $TMPDIR**，於是在
-  # 只放行 $TMPDIR 的 sandbox 下七處全部 mkdtemp 失敗。fail-closed 分支會照實報，
+  # template 不可省（本檔每一處 mktemp 皆同——不寫處數，這行前一版寫「七處」而實測是
+  # 六處，2026-08-28 機械枚舉；理由同本檔 :968 記載的反模式）：macOS 的 mktemp 在沒有
+  # template 時走 confstr(_CS_DARWIN_USER_TEMP_DIR)（/var/folders/…/T/）而**忽略 $TMPDIR**，
+  # 於是在只放行 $TMPDIR 的 sandbox 下全部 mkdtemp 失敗。fail-closed 分支會照實報，
   # 但整份測試因此產出 16 個假 FAIL（2026-08-08 實測），等於在 sandbox 內不可用——
   # 而「在 sandbox 內跑不動」會直接讓自動化執行點無法採用這支測試。
   _nopy=$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX") || _nopy=""

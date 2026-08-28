@@ -229,8 +229,10 @@ if [ "${1:-}" = "--selftest" ]; then
   run '引號規避仍擋'             'gh "pr" merge'                  PASS        2
   # bash 解析後照樣執行，正規化前 *pr*merge* 卻看不到連續的 merge——fail-open
   run 'line-continuation 拆字仍擋' "$(printf 'gh pr mer\\\nge 42')" FAIL_CI    2
-  # 以下四項刻意用 STATE=PASS 的 gate：若 exit 仍是 2，就證明是 substitution 判定擋的，
+  # 以下這組刻意用 STATE=PASS 的 gate：若 exit 仍是 2，就證明是 substitution 判定擋的，
   # 而不是 gate 回報擋的——用 FAIL_CI 的 gate 兩者無法區分。
+  # 不寫項數：本行前一版寫「四項」而實測已是六項（2026-08-28 機械枚舉）。註解一複述可
+  # 枚舉的數量就會漂移，本檔上方 ci= 分流那段已記過同一個反模式。
   # shellcheck disable=SC2016 # $( ) 是測試字面，不得展開
   run '$( ) 拆字一律保守拒絕'    'gh pr m$(printf er)ge 42'       PASS        2
   # shellcheck disable=SC2016
@@ -256,8 +258,9 @@ if [ "${1:-}" = "--selftest" ]; then
   run 'gh pr create 放行'        'gh pr create --fill'            FAIL_CI     0
   run 'gh pr view 放行'          'gh pr view 42'                  FAIL_CI     0
   run '無關指令放行'             'dotnet build -c Release'        FAIL_CI     0
-  # 誤擋防護：子字串比對時代這四項都會被擋，且擋得毫無道理。gate 一律用 FAIL_CI，
-  # 所以 exit 0 只可能來自「沒被判定成合併意圖」，不可能來自 gate 放行。
+  # 誤擋防護：子字串比對時代，上下這些唯讀或無關的指令都會被擋，且擋得毫無道理。
+  # gate 一律用 FAIL_CI，所以 exit 0 只可能來自「沒被判定成合併意圖」，不可能來自 gate 放行。
+  # 同樣不寫項數（前一版寫「四項」，而這段前後的 case 數已變過兩次）。
   # shellcheck disable=SC2016 # $( ) 是測試字面，不得展開
   run '--left-right+printf 不誤擋' 'git rev-list --left-right main...origin/main; printf "%s" $(echo x)' FAIL_CI 0
   # shellcheck disable=SC2016
@@ -269,6 +272,14 @@ if [ "${1:-}" = "--selftest" ]; then
   run 'gh pr view merge* 欄位放行' 'gh pr view 42 --json mergeCommit,mergeStateStatus,mergeable,mergedAt,mergedBy' FAIL_CI 0
   # 收窄成 token 後，完整路徑呼叫仍須偵測得到——否則就從誤擋修成了漏擋。
   run 'gh 完整路徑仍偵測'        '/opt/homebrew/bin/gh pr merge 42' FAIL_CI   2
+  # has_gh_pr stage 0 的反向。上面那組誤擋防護測的是「gh 開頭但不是 merge」，這組補的是
+  # 「是 merge 但不是 gh」——同一個 stage 0 判定的另一半，2026-08-28 之前零覆蓋。
+  # 三種形狀各壓住 stage 0 的一種寫錯法：裸 token 比對放寬成任意執行檔、`*/[Gg][Hh]` 的
+  # glob 寫成 `*gh*` 而讓路徑中段或結尾近似的中標、以及漏掉錨點讓 gh 當前綴也算。
+  # gate 一律 FAIL_CI，所以 exit 0 只可能來自「沒被判定成合併意圖」，不可能來自 gate 放行。
+  run '非 gh 執行檔不誤擋'       'git pr merge 42'                  FAIL_CI   0
+  run '路徑結尾近似 gh 不誤擋'   '/usr/local/bin/ghost pr merge 42' FAIL_CI   0
+  run 'gh 為前綴不誤擋'          'mygh pr merge 42'                 FAIL_CI   0
   # jq fallback canary：jq 不可用或 payload 壞掉時走的那條路徑，也必須用同一份
   # 正規化結果比對。若只比對原始字串，line-continuation 拆開的意圖在 jq 缺席時
   # 完全不會被偵測——防線在最該保守的情境下反而最寬。傳入無效 JSON 觸發同一分支。
@@ -367,6 +378,29 @@ if [ "${1:-}" = "--selftest" ]; then
   else
     printf '  FAIL  reason 含引號時 deny 輸出非法 JSON：%s\n' "$esc_out"; f=$((f+1))
   fi
+
+  # exit code 交叉驗證。上面所有 fake gate 都 exit 0，所以這道檢查對它們是 no-op——
+  # 也就是說沒有這三條，把 GATE_RC 那段整個刪掉不會有任何測試轉紅。三條各自釘一件事：
+  # 矛盾要擋、不矛盾不能誤擋、12 是 PASS_NO_CI 的正確值而非「任何非 0」。
+  # 直接寫 fake gate 而不走 run／runraw：那兩個生成器固定 exit 0，要讓它們模擬 exit code
+  # 就得改介面，而它們是其餘 74 條賴以運作的 fixture 來源。
+  rc_probe() { # $1=label $2=gate-stdout $3=gate-exit $4=want(block|allow)
+    printf '#!/bin/sh\nprintf %%b %s\nexit %s\n' "'$2'" "$3" > "$d/gate"
+    chmod +x "$d/gate"
+    if printf '%s' '{"tool_input":{"command":"gh pr merge 42"},"cwd":"/tmp"}' |
+         PR_REVIEW_GATE="$d/gate" "$0" >/dev/null 2>&1; then
+      if [ "$4" = allow ]; then printf '  PASS  %s\n' "$1"; p=$((p+1))
+      else printf '  FAIL  %s（期望擋下，實得放行）\n' "$1"; f=$((f+1)); fi
+    else
+      if [ "$4" = block ]; then printf '  PASS  %s\n' "$1"; p=$((p+1))
+      else printf '  FAIL  %s（期望放行，實得擋下）\n' "$1"; f=$((f+1)); fi
+    fi
+  }
+  rc_probe 'STATE=PASS 但 exit 20 時不放行' 'STATE=PASS pr=42 head=abc\n' 20 block
+  rc_probe 'STATE=PASS 且 exit 0 時放行'    'STATE=PASS pr=42 head=abc\n' 0  allow
+  rc_probe 'PASS_NO_CI 的正確 rc 是 12'     'STATE=PASS_NO_CI pr=42 head=abc ci=BILLING_QUOTA\n' 12 allow
+  rc_probe 'PASS_NO_CI 配 exit 30 時不放行' 'STATE=PASS_NO_CI pr=42 head=abc ci=BILLING_QUOTA\n' 30 block
+
   printf '總計：PASS=%s FAIL=%s\n' "$p" "$f"
   [ "$f" -eq 0 ]
   exit $?
@@ -613,7 +647,7 @@ cd "$CWD" || deny "[T0-9] 無法切換到執行目錄（${CWD}），pr-review-ga
 # 草案註解，也把 hard_deny[1] 改成「只有 BILLING_QUOTA 授權」。本段前一版寫「那份
 # 草案早於 PR #38」，是假的，2026-08-27 S5 round 1 Spec 軸指出並經 git show 逐檔核對
 # （50b92b7 兩者皆無、53de575 兩者皆有）。PR #38 自己出的就是這對自相矛盾的東西。
-OUT=$("$GATE" "$PR" 2>&1) || true
+OUT=$("$GATE" "$PR" 2>&1); GATE_RC=$?
 # 比對前只做三件事：取第一行、剝掉行尾一個 CR、前後各補一格空白。
 #
 #   * 只取第一行——case 的 glob 會跨換行比對，而 OUT 併了 stderr。第一行沒有 ci=、
@@ -637,6 +671,27 @@ OUT=$("$GATE" "$PR" 2>&1) || true
 LINE1=${OUT%%$'\n'*}
 LINE1=${LINE1%$'\r'}
 PAD=" $LINE1 "
+
+# gate 的 exit code 當獨立交叉驗證。此前這行是 `|| true`，exit code 整個丟掉，判定完全
+# 押在 stdout 一條線上。
+#
+# 對照（~/.agents/bin/pr-review-gate）：0=PASS、12=PASS_NO_CI、10=WAIT_CI、
+# 11=WAIT_READY/REQUESTED/WAIT_REVIEW、20=FINDINGS、30=UNAVAILABLE/FAIL_*、64=usage。
+#
+# 刻意只驗**一個方向**：rc 明確表示不通過，stdout 卻宣稱可放行。反方向（rc 是 0 或 12 卻
+# 印出不可放行的狀態）不驗——那個組合的判定權仍歸 stdout，加驗只會讓 selftest 的 fake
+# gate 全部得跟著模擬 exit code，而那是 74 條測試賴以運作的 fixture 生成器，動它的風險
+# 遠大於這半邊的收益。今天所有 fake gate 都 exit 0，所以這道檢查對它們是 no-op。
+#
+# 涵蓋 127（gate 不存在／不可執行）與任何未列出的 rc：只要不是 0 或 12，宣稱放行就矛盾。
+if [ "$GATE_RC" -ne 0 ] && [ "$GATE_RC" -ne 12 ]; then
+  case "$PAD" in
+    " STATE=PASS "*|" STATE=PASS_NO_CI "*)
+      deny "[T0-9] gate 輸出宣稱 ${LINE1%% *} 但 exit code 是 ${GATE_RC}（0=PASS、12=PASS_NO_CI）。兩者矛盾時不放行。gate 原文：${LINE1}"
+      ;;
+  esac
+fi
+
 # 狀態與 ci= 分成兩層比對，不寫成 `" STATE=X "*" ci=Y "*` 這種一層的形式：欄位之間
 # 只有**一個**空白，一層寫法會讓 STATE 的 pattern 把那個空白吃掉，ci= 就沒有前導空白
 # 可比對。實測 `STATE=PASS_NO_CI ci=BILLING_QUOTA`（ci= 緊接 STATE，也是
