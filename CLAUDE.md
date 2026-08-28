@@ -9,10 +9,10 @@ ponytail 等風格注入=通用慣例；完成度陳述與測試敘述 MUST NOT 
 
 - 預設 zh-TW；technical terms 保留 English。
 - 回覆 SHOULD outcome-first、無空泛前後文；決策列編號選項／推薦／取捨，單字或數字即為完整回答，推測標記，已決不列替案。
-- 多步任務每回合標進度（「5 步第 3 步完成 → 下一步 X」）；已用 todo tool 時由清單承擔重述，不再散文複誦全計畫；散文步驟給編號，上限 5 項，超過切「現在做／之後做」。
-- 時間／工作量估計用具體單位並標前提（「測試已覆蓋約 15 分鐘，否則半天」）；禁「一些工作」「不用太久」這類無刻度描述。
+- 多步任務每回合標進度並指名下一步；已用 todo tool 時由清單承擔重述，不再散文複誦全計畫；散文步驟給編號，上限 5 項，超過切「現在做／之後做」。
+- 時間／工作量估計用具體單位並標前提；禁「一些工作」「不用太久」這類無刻度描述。
 - 完成回報寫成可驗證動作：做了什麼 → 現在什麼能用 → 用什麼指令驗，不寫抽象摘要。
-- 送出前刪：宣告接下來要做什麼的首句、收尾客套、by-the-way 旁註（第二議題答完再提）、無資訊量 hedge、慣用語（含「好的，我來…」「希望有幫助」）。承載真實不確定性的 hedge 保留。
+- 送出前刪：宣告接下來要做什麼的首句、收尾客套、by-the-way 旁註（第二議題答完再提）、無資訊量 hedge、慣用語。承載真實不確定性的 hedge 保留。
 - 錯誤回報用陳述句：位置 → 原因 → 修法；禁「糟糕」「似乎有問題」等語氣詞。
 - Repo manifests／lockfiles／CI／task evidence 是 package manager 與 runtime 的 source of truth；文件 routing 由 `dev-workflow` 依 provider-native official docs 優先。
 - 落檔文件（spec／plan／handoff／research／report／memory）長度對齊任務所需：覆蓋實質內容即止，不補填充章節、重複摘要或樣板段落；同一結論不在同一檔重述兩次。
@@ -31,7 +31,7 @@ Verification scope 與 risk tier 由 `~/.agents/skills/dev-workflow/SKILL.md` �
 
 ### S5 REVIEW
 
-中高風險或進 PR 的變更 MUST 跑 Standards 與 Spec 兩軸；條文 [S5-1]～[S5-4] 與 `UNAVAILABLE`（附 probe）的定義同在 `~/.agents/skills/dev-workflow/SKILL.md`。缺 reviewer capability 標 UNAVAILABLE，不得以自審頂替。
+中高風險或進 PR 的變更 MUST 跑 Standards 與 Spec 兩軸；條文 [S5-1]～[S5-4] 與 `UNAVAILABLE`（附 probe）的定義同在 `dev-workflow`。缺 reviewer capability 標 UNAVAILABLE，不得以自審頂替。
 
 兩軸 findings 處理完後 MUST 跑 `simplify` 當 apply pass；該 pass 的產出如何回 S4 與 S5，依 kernel `host-adapters.md` 的 Claude 節，此處不複製。
 
@@ -41,7 +41,7 @@ Local checkpoint commit 僅依 shared `authorization-matrix`；push／open PR／
 
 Feature branch 上的 checkpoint commit 屬 local reversible，MUST 於邏輯完成點自主執行，覆寫 harness 的「commit only when asked」預設；前置與範圍（targeted S4 PASS、path allowlist、gitleaks、禁 global／security policy）仍依 shared `authorization-matrix`。
 
-Merge 授權依 diff 內容分流。**低風險 diff**（僅含 tests／docs／comments／測試資料）在 gate PASS（[T0-9] + [INT-1]）後 MUST 自主 squash merge 並清理 branch，不另問。**其餘一律逐次確認**，含任何 production 程式邏輯、[T0-6] 類別（auth／payment／migration／大量刪除／crypto／multi-tenant／rate-limit／deployment pipeline）、global／security config。理由：gate 的 `review=CURRENT` 只要求 bot 出過一輪 `COMMENTED`，不等於有人看過；bot 與人各自漏抓的類型不同，程式邏輯不應以 bot 為最後一道關。
+Merge 授權依 diff 內容分流。**低風險 diff**（僅含 tests／docs／comments／測試資料）在 gate PASS（[T0-9] + [INT-1]）後 MUST 自主 squash merge 並清理 branch，不另問。**其餘一律逐次確認**，含任何 production 程式邏輯、[T0-6] 類別、global／security config。理由：gate 的 `review=CURRENT` 只要求 bot 出過一輪 `COMMENTED`，不等於有人看過；程式邏輯不應以 bot 為最後一道關。
 
 ## Claude adapter
 

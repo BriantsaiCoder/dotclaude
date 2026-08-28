@@ -236,10 +236,26 @@ else
 fi
 
 # ── 6. Matt thin kernel ────────────────────────────────────────
-if [ "$(wc -c < CLAUDE.md | tr -d ' ')" -le 5000 ]; then
+# 硬閘之外另設軟閘。2026-08-28 之前這裡只有硬閘，而 CLAUDE.md 距它只剩二十幾個 byte——
+# 下一次改 anchor 或加一行條文就直接撞上，而硬閘沒有預警，只會在 PR 當下才紅。另兩家
+# host 早就是兩層（Codex 與 Copilot 都是硬閘加 95% 軟閘），只有 Claude 這邊缺。
+#
+# 不在註解裡記當下的 byte 數與餘裕：那些每改一個字就過期，而兩道閘都還是綠的，沒有東西
+# 會提醒你註解已經不對。實測數字進 commit message（那是有日期、不會被誤讀成現況的地方）。
+#
+# 兩者都是 FAIL 不是 warning：軟閘的作用是在還有空間時就逼人處理，而不是等撞上設計上限
+# 才發現。失敗訊息帶實際 byte 數，因為「超過了多少」是決定要瘦身還是要重新檢視上限的依據。
+_claude_md_bytes=$(wc -c < CLAUDE.md | tr -d ' ')
+if [ "$_claude_md_bytes" -le 5000 ]; then
   ok "CLAUDE.md thin budget <= 5000B"
 else
-  bad "CLAUDE.md 超過 thin budget"
+  bad "CLAUDE.md 超過 thin budget（${_claude_md_bytes}B）"
+fi
+
+if [ "$_claude_md_bytes" -lt 4750 ]; then
+  ok "CLAUDE.md 在軟閘之內"
+else
+  bad "CLAUDE.md 已越過軟閘（${_claude_md_bytes}B）：距硬閘所剩無幾，先瘦身或重新檢視上限，不要等撞硬閘"
 fi
 
 if rg -q '^@~/.claude/core/tier0-safety\.md$' CLAUDE.md &&
@@ -360,9 +376,14 @@ else
   }
   # mktemp 失敗不能 exit——那會跳過下面的總結與「至少跑到了」自證，讓整份測試靜默短路。
   #
-  # template 不可省（本檔七處皆同）：macOS 的 mktemp 在沒有 template 時走
-  # confstr(_CS_DARWIN_USER_TEMP_DIR)（/var/folders/…/T/）而**忽略 $TMPDIR**，於是在
-  # 只放行 $TMPDIR 的 sandbox 下七處全部 mkdtemp 失敗。fail-closed 分支會照實報，
+  # template 不可省，本檔每一處 mktemp 皆同。不寫處數：這行前一版寫「七處」，2026-08-28
+  # 改寫時又寫成「六處」，兩個都錯（實際九處，`mktemp -d` 八處加一處帶字面 template 的
+  # `mktemp`）——同一行在兩次修訂裡各數錯一次，正是「註解一複述可枚舉的數量就會漂移」
+  # 這條的示範。理由同本檔那條寫著「上限只寫一次、三處引用」的註解（引句不引行號：
+  # 行號會隨每次改動漂移，這行原本引的 :968 在同一個 commit 裡就已經被推移）。
+  #
+  # macOS 的 mktemp 在沒有 template 時走 confstr(_CS_DARWIN_USER_TEMP_DIR)（/var/folders/…/T/）而**忽略 $TMPDIR**，
+  # 於是在只放行 $TMPDIR 的 sandbox 下全部 mkdtemp 失敗。fail-closed 分支會照實報，
   # 但整份測試因此產出 16 個假 FAIL（2026-08-08 實測），等於在 sandbox 內不可用——
   # 而「在 sandbox 內跑不動」會直接讓自動化執行點無法採用這支測試。
   _nopy=$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX") || _nopy=""
@@ -811,8 +832,10 @@ _merge_probe deny  'STATE=PASS_NO_CI pr=42 head=abc review=CURRENT unresolved=0'
   'PASS_NO_CI 但無 ci= 欄' '沒有可辨識的 ci= 欄位'
 _merge_probe deny  'STATE=FAIL_CI pr=42 head=abc review=CURRENT unresolved=0' \
   'STATE=FAIL_CI' 'merge gate 未通過'
-# 上面六條的 ci= 全落在行中，那是每一版都處理正確的形狀，所以它們只抓得到
-# 「ci= 分流被整套拿掉」。下面這四條才是本 branch 每一版**各自**弄錯的形狀，
+# 上面那組的 ci= 全落在行中，那是每一版都處理正確的形狀，所以它們只抓得到
+# 「ci= 分流被整套拿掉」。下面那組才是本 branch 每一版**各自**弄錯的形狀，
+# （兩組都不寫條數：前一版寫「下面這四條」而實際是六條，2026-08-28 S5 指出。理由同
+# 本檔那條寫著「不寫案數：這行原本寫『18 案』，之後每加一批就漂一次」的註解。）
 # 抓的是「分流退回某個有 bug 的版本」——那才是真正會發生的迴歸。
 #   ci= 落在行尾              第一版要求 ci 值右側有空白，於是唯一被授權的狀態被擋，
 #                             而政策值拿到「找不到 ci= 欄」這個相反的理由。
