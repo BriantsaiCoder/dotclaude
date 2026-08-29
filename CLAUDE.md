@@ -2,6 +2,7 @@
 
 <!-- Claude owns this routing/governance file and ~/.claude/core|rules|hooks. Shared workflow methods live only in ~/.agents/skills. -->
 @~/.claude/core/tier0-safety.md
+@~/.agents/profile.md
 
 ponytail 等風格注入=通用慣例；完成度陳述與測試敘述 MUST NOT 覆寫 [T0-2]／dev-workflow [INT-2]。
 

@@ -191,9 +191,27 @@ if [ ! -d "$shared_skills" ]; then
   printf '  SKIP  shared source 不可得（%s）；link 目標存在性由本機 agents-sync --doctor 負責\n' "$shared_skills"
 else
   skill_bad=0
+  # shared 側已 gitignore 的 skill 不參與一一對應斷言。這類 skill 是刻意永久不進版控
+  # （個人工作脈絡，見本 repo .gitignore 的 exec-briefing 段），所以「source 在、link
+  # 不在」是正常狀態而非斷鏈。沒有這個出口的話，本機恆紅而 CI 恆綠（CI 走上面的
+  # SKIP 分支），且無法用任何既有機制消除——守衛失去訊號就是這樣開始的。
+  # 用 if 不用 `&&`：這裡是條件跳過不是序列執行，`cmd && continue` 讀起來像後者。
+  # 本檔是 `set -uo pipefail`（無 -e），所以 `&&` 當下不會中止；但它讓該行在條件不成立時
+  # 回非 0，一旦日後被移到迴圈末尾、或本檔改開 -e，就會從「不跳過」變成「中止」。
+  # repo root 由 $shared_skills 推導而非硬寫 $HOME/.agents：SHARED_SKILLS_ROOT 可覆寫來源，
+  # 寫死會在覆寫時對「錯的 repo（或非 repo）」做 check-ignore，讓該跳過的 skill 仍進斷言。
+  # 探測只做一次，不在迴圈內每圈呼叫 rev-parse。
+  shared_root=$(cd "$shared_skills/.." 2>/dev/null && pwd -P) || shared_root=""
+  shared_is_repo=0
+  if [ -n "$shared_root" ] && git -C "$shared_root" rev-parse --git-dir >/dev/null 2>&1; then
+    shared_is_repo=1
+  fi
   while IFS= read -r source; do
     name=$(basename "$source")
     link="skills/$name"
+    if [ "$shared_is_repo" -eq 1 ]; then
+      if git -C "$shared_root" check-ignore -q "skills/$name"; then continue; fi
+    fi
     if [ ! -L "$link" ]; then
       bad "Claude skill link 缺失: $name"
       skill_bad=$((skill_bad+1))
@@ -217,7 +235,56 @@ fi
 if rg -q '\.agents/(core|rules|hooks)(/|`|$)' CLAUDE.md settings.json; then
   bad "active config 仍引用 .agents control plane"
 else
-  ok "active config 的 .agents refs 僅限 skills"
+  # 訊息說的是「未引用 control plane」而不是「僅限 skills」：本斷言只擋 core|rules|hooks，
+  # 而 CLAUDE.md 確實有非 skills 的 .agents ref（@~/.agents/profile.md）——那是三 host 都以
+  # 絕對路徑讀的 runtime asset，不是 control plane，本來就該放行。舊措辭會讓下一個人以為
+  # 有一道不存在的守衛。
+  ok "active config 未引用 .agents control plane"
+fi
+
+# CLAUDE.md 的 @import 目標存在性。新增動機（2026-08-29）：@~/.agents/profile.md 指向一個
+# 在別的 repo 被 gitignore 的檔案，換機還原後必然不存在，而 @import 失敗是**靜默**的——
+# 上面那條 rg 斷言只驗「那行文字在」，不驗目標檔在。缺個人背景是 graceful degradation，
+# 但 tier0-safety.md 同樣走 @import，斷鏈就是安全網靜默消失。
+# 跳過指向 $HOME/.agents 的行（沿用本檔 shared_skills 段的同一個理由：CI 無 ~/.agents）。
+# 逐類解析，不能一律展開成 `${HOME}`：CI 的 checkout 不在 `${HOME}/.claude`（runner 的家目錄是
+# /home/runner，repo 在 /home/runner/work/dotclaude/dotclaude），所以 `~/.claude/x` 要相對
+# **repo 根**解析才驗得到；一律用 $HOME 展開會讓 CI 恆紅——2026-08-29 run 33248987799 實證
+# （FAIL: @import 目標不存在: ~/.claude/core/tier0-safety.md，而該檔就在 checkout 內且 tracked）。
+# `~/.agents/x` 則相反：那是本機才有的外部依賴，CI 無該目錄時跳過。
+# 跳過的判準是 `${HOME}/.agents` 本身而**不是** `${shared_skills}`，後者可被 SHARED_SKILLS_ROOT
+# 指到別處，那時「shared skills 可得」與「~/.agents 可得」是兩件事，用前者判斷會在
+# ~/.agents 不存在時仍去 -f 檢查它底下的檔案並誤報。判斷條件必須跟被判斷的路徑同源。
+import_bad=0
+import_skipped=0
+while IFS= read -r line; do
+  target=${line#@}
+  case "$target" in
+    "~/.claude/"*)
+      probe=${target#\~/.claude/}   # repo 根就是 ~/.claude 的內容
+      ;;
+    "~/.agents/"*)
+      if [ ! -d "$HOME/.agents" ]; then
+        import_skipped=$((import_skipped+1))
+        continue
+      fi
+      probe=${target/#\~/$HOME}
+      ;;
+    *)
+      probe=${target/#\~/$HOME}
+      ;;
+  esac
+  [ -f "$probe" ] || {
+    bad "CLAUDE.md @import 目標不存在: $target"
+    import_bad=$((import_bad+1))
+  }
+done < <(rg -N '^@' CLAUDE.md || true)
+if [ "$import_bad" -eq 0 ]; then
+  if [ "$import_skipped" -gt 0 ]; then
+    ok "CLAUDE.md @import 目標皆存在（${import_skipped} 條指向 ~/.agents 者跳過：該目錄不可得）"
+  else
+    ok "CLAUDE.md @import 目標皆存在"
+  fi
 fi
 
 if rg -q '<!-- agents-routing:(begin|end)' CLAUDE.md; then

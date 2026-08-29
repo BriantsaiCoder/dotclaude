@@ -48,3 +48,12 @@
 
 # 排除：本地專屬設定（包含敏感變數，per Hard Rules 不 commit）
 settings.local.json
+
+# 排除：exec-briefing skill 的 symlink。正本在 ~/.agents/skills/exec-briefing/，該處已
+# 由 ~/.agents/.gitignore 排除（個人向上簡報 skill，屬個人工作脈絡不進版控）。此處若讓
+# 上面的 `!skills/**` 收走這條 symlink，換機還原後會得到一條指向不存在目標的斷鏈。
+# 必須放在 `!skills/**` 之後才蓋得掉 allowlist 的誤收。
+# 這裡是 symlink 不是目錄，pattern 不可帶尾斜線——dir-only pattern 不匹配 symlink，
+# 加了斜線就會被 `!skills/**` 收回去。~/.agents 那邊是真目錄故帶斜線，兩者刻意不同，
+# 不要「順手對齊」。
+skills/exec-briefing
