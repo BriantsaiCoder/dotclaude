@@ -275,7 +275,18 @@ while IFS= read -r line; do
       ;;
   esac
   [ -f "$probe" ] || {
-    bad "CLAUDE.md @import 目標不存在: $target"
+    # profile.md 給專屬訊息：它是 gitignored 且無異地備份的唯一一份，換機還原後
+    # repo clone 得回來、它回不來——這是 graceful degradation（三家 runtime 的
+    # 「缺檔則跳過」）加上「請手動重建」，不是 tier0-safety.md 那種安全網斷鏈。
+    # 共用訊息會讓還原後的紅被誤讀成後者。
+    case "$target" in
+      "~/.agents/profile.md")
+        bad "使用者背景檔不存在：~/.agents/profile.md（不進版控、無異地備份，需手動重建；三家 runtime 皆會 graceful 跳過）"
+        ;;
+      *)
+        bad "CLAUDE.md @import 目標不存在: $target"
+        ;;
+    esac
     import_bad=$((import_bad+1))
   }
 done < <(rg -N '^@' CLAUDE.md || true)
@@ -330,6 +341,18 @@ if rg -q '^@~/.claude/core/tier0-safety\.md$' CLAUDE.md &&
   ok "只常駐載入 Claude-local tier0"
 else
   bad "Claude core import 尚未 thin"
+fi
+
+# 使用者背景的載入必須留在 CLAUDE.md。三 host 都讀 ~/.agents/profile.md，但沒有任何
+# 東西在守這件事——而它已經靜默消失過一次（2026-08-29：16:26 加入、17:00 依當時明示
+# 移除、17:17 使用者改變決定要求補回）。前面的 @import 存在性迴圈驗的是「目標檔在不在」，
+# 驗不到「這一行在不在」；整行被刪掉時那個迴圈只會少跑一圈，不會出聲。
+# 對稱斷言：Codex 側在 ~/.codex/tests/global-config-ownership.sh 的 $contract 迴圈，
+# Copilot 側在 ~/.copilot/tests/global-config-ownership.sh。三家各自獨立、零 byte 成本。
+if rg -q '^@~/\.agents/profile\.md$' CLAUDE.md; then
+  ok "CLAUDE.md 保留使用者背景載入"
+else
+  bad "CLAUDE.md 缺使用者背景載入：@~/.agents/profile.md"
 fi
 
 # 結構性 marker 留在 CLAUDE.md：它們是 host adapter 自己的骨架，不是 shared method。
