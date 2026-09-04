@@ -1,15 +1,18 @@
 #!/bin/bash
 # turn-mode · UserPromptSubmit
 # 來源：2026-09-04 使用者指示——保留 ultracode，但「問題／分析型」提問一律單代理，只有真正的開發任務才編排 Workflow。
-# 規則只活在這支 hook（~/.claude/CLAUDE.md 距 byte 軟閘僅剩 59 B，放不下），注入文自帶出處供稽核回查。
+# 規則只活在這支 hook（~/.claude/CLAUDE.md 受 byte 軟閘限制，餘裕放不下一條規則），注入文自帶出處供稽核回查。
 # 行為：提示命中問題型樣式才輸出一行使用者層級 steer；開發型提示與明示 opt-in（ultracode／use a workflow）靜默。
 # 純 heuristic：誤判成問題型的代價是先答再依 dev-workflow 改檔，不擋任何動作。
 # 整串比對用 bash [[ =~ ]]（$ 錨串尾而非逐行；nocasematch 讓英文樣式不分大小寫）。
 # --selftest：跑內建案例，由 tests/repo-integrity.sh 接線。
-# locale 只在本機真的有 UTF-8 locale 時才設（硬編碼不存在的 locale 會讓 bash 對 stderr 吐 setlocale 警告）；
-# 找不到就維持環境原樣——樣式全是字面 CJK 與 ASCII 交替，C locale 下也能比對。
-_utf8=$(locale -a 2>/dev/null | grep -i -m1 -E '^(en_US|C)\.utf-?8$')
-[ -n "$_utf8" ] && export LC_ALL="$_utf8"
+# locale：環境已是 UTF-8 就不動；否則只在本機真的有 UTF-8 locale 時才設（硬編碼不存在的 locale 會讓 bash
+# 對 stderr 吐 setlocale 警告），找不到維持原樣——樣式全是字面 CJK 與 ASCII 交替，C locale 下也能比對。
+case "${LC_ALL:-${LC_CTYPE:-$LANG}}" in
+  *[Uu][Tt][Ff]-8|*[Uu][Tt][Ff]8) ;;
+  *) _utf8=$(locale -a 2>/dev/null | grep -i -m1 -E '^(en_US|C)\.utf-?8$' 2>/dev/null)
+     [ -n "$_utf8" ] && export LC_ALL="$_utf8" ;;
+esac
 shopt -s nocasematch
 OPTIN='ultracode|use a workflow|run a workflow'
 ASK='(\?|？)[[:space:]]*$|為何|為什麼|是否|什麼原因|可能是什麼|幫我分析|幫我說明|幫我比較|幫我評估|你會建議|分析一下|解釋一下|說明一下|(^|[^[:alnum:]])(why|how come|should i|is it)([^[:alnum:]]|$)'
