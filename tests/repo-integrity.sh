@@ -961,6 +961,18 @@ if [ -f hooks/guard-s5-ledger.sh ]; then
   fi
 fi
 
+# turn-mode（UserPromptSubmit steer）的分類案例同樣自帶 --selftest：問題型 steer／開發型與
+# 明示 opt-in 靜默。S5 round 1 指出 commit 宣稱「6 案例」但 diff 內無任何測試，regex 回歸
+# 無人守——接線後 case 跟著 hook 走，不另抄一份會漂移的期望值。
+if [ -f hooks/turn-mode.sh ]; then
+  if _tm_out=$(bash hooks/turn-mode.sh --selftest 2>&1); then
+    ok "turn-mode selftest: $(printf '%s' "$_tm_out" | tail -1)"
+  else
+    printf '%s\n' "$_tm_out" | tail -5
+    bad "turn-mode selftest 失敗（上列為輸出末段）"
+  fi
+fi
+
 # 行為案例只在條件真的成立時才跑：/tmp 可寫就重現不了，標 SKIP 而不是給一個
 # 沒有意義的綠。sandbox 內 /tmp 被擋，這兩條才有鑑別力。
 if [ -n "$push_probe_dir" ]; then

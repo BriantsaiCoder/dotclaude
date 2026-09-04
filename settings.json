@@ -192,6 +192,16 @@
             "async": true
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/turn-mode.sh",
+            "timeout": 2,
+            "async": false
+          }
+        ]
       }
     ]
   },
