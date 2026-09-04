@@ -123,7 +123,7 @@
           {
             "type": "command",
             "command": "bash ~/.claude/hooks/guard-git-push.sh",
-            "timeout": 3,
+            "timeout": 15,
             "async": false
           },
           {
