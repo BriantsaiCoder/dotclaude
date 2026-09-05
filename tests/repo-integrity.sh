@@ -454,18 +454,19 @@ fi
 # drift-check.sh 的 stdout 契約（理由見該檔註解）；HOME 指到 fixture 讓 parity checker 因缺檔跳過。
 dc_dir="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || dc_dir=""
 if [ -n "$dc_dir" ] && mkdir -p "$dc_dir/hooks" "$dc_dir/tests" && cp hooks/drift-check.sh "$dc_dir/hooks/"; then
-  # stub 吐 6 條 FAIL 夾 PASS 並往 stderr 吐雜訊：釘「只印 FAIL 行」「最多 5 條」與「suite 的 stderr 不外漏」——
-  # 把 grep 拿掉、改數字、拿掉 2>/dev/null 都得紅。
+  # stub 吐 7 條 FAIL 夾 PASS（第二條是無縮排的 fail-open 自證行）並往 stderr 吐雜訊：釘「stdout 恰 = WARNING + 5 行、
+  # 全是 FAIL、含無縮排那條、stderr 不外漏」——把 grep 拿掉、改數字、樣式從 ^ *FAIL 退回 ^  FAIL、拿掉 2>/dev/null 都得紅。
   printf '%s\n' 'echo noise >&2' \
-    'printf "  %s\n" "PASS  a" "FAIL  f1" "PASS  b" "FAIL  f2" "FAIL  f3" "FAIL  f4" "FAIL  f5" "FAIL  f6"' \
+    'printf "%s\n" "  PASS  a" "  FAIL  f1" "FAIL  unindented" "  PASS  b" "  FAIL  f2" "  FAIL  f3" "  FAIL  f4" "  FAIL  f5" "  FAIL  f6"' \
     'exit 1' > "$dc_dir/tests/repo-integrity.sh"
   dc_out=$(HOME="$dc_dir" bash "$dc_dir/hooks/drift-check.sh" 2>"$dc_dir/stderr"); dc_rc=$?
   dc_err=$(cat "$dc_dir/stderr")
-  dc_fails=$(printf '%s\n' "$dc_out" | grep -c '^  FAIL')
-  if [[ $dc_rc -eq 0 && $dc_out == *WARNING* && $dc_out != *PASS* && $dc_fails -eq 5 && -z $dc_err ]]; then
-    ok "drift-check 失敗時 stdout 為 WARNING + 恰 5 條 FAIL（無 PASS 行）、stderr 空、exit 0"
+  dc_lines=$(printf '%s\n' "$dc_out" | wc -l | tr -d ' ')
+  dc_fails=$(printf '%s\n' "$dc_out" | grep -c '^ *FAIL')
+  if [[ $dc_rc -eq 0 && $dc_out == WARNING* && $dc_out == *'FAIL  unindented'* && $dc_lines -eq 6 && $dc_fails -eq 5 && -z $dc_err ]]; then
+    ok "drift-check 失敗時 stdout 恰為 WARNING + 5 條 FAIL（含無縮排 fail-open 行）、stderr 空、exit 0"
   else
-    bad "drift-check 失敗輸出形狀不符 rc=${dc_rc} fails=${dc_fails} stdout=«${dc_out:0:80}» stderr=«${dc_err:0:80}»"
+    bad "drift-check 失敗輸出形狀不符 rc=${dc_rc} lines=${dc_lines} fails=${dc_fails} stdout=«${dc_out:0:80}» stderr=«${dc_err:0:80}»"
   fi
   printf 'exit 0\n' > "$dc_dir/tests/repo-integrity.sh"
   dc_out=$(HOME="$dc_dir" bash "$dc_dir/hooks/drift-check.sh" 2>"$dc_dir/stderr"); dc_rc=$?
