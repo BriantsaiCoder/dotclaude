@@ -145,7 +145,7 @@ if [ -f settings.json ]; then
           "$override_shared/$s/"*) ;;
           *) route_hit=1; break ;;
         esac
-      done < <(rg -l --no-ignore -g '*.md' -e "(^|[^A-Za-z0-9_-])${s}([^A-Za-z0-9_-]|$)" "$override_shared" CLAUDE.md rules 2>/dev/null)
+      done < <(rg -l --no-ignore -g '*.md' -e "(^|[^A-Za-z0-9_-])${s}([^A-Za-z0-9_-]|$)" -- "$override_shared" CLAUDE.md rules 2>/dev/null)
       [ "$route_hit" -eq 1 ] || unrouted_overrides="${unrouted_overrides:+$unrouted_overrides }$s"
     done
     if [ -z "$unrouted_overrides" ]; then
