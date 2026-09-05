@@ -13,7 +13,7 @@ templates/
   compact.md         # /compact 與 cross-session handoff 模板
 agents/              # 自訂 subagent 定義
 commands/            # 自訂 slash commands
-hooks/               # 自訂 hooks（audit-bash / session-time / turn-mode 問題型單代理／開發型視同 Workflow opt-in steer / guard-* / mcp 修補）
+hooks/               # 自訂 hooks（audit-bash / session-time / turn-mode 提示分類 steer，行為見檔頭 / guard-* / mcp 修補）
 skills/              # 自訂 skill（多為 symlink 至 ~/.agents/skills/）
 settings.json        # Claude Code 設定
 statusline-command.sh
