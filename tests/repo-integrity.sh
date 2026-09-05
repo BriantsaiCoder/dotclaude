@@ -204,8 +204,8 @@ done
 
 # 這一節比對 link 與 shared source 是否一一對應，只有 ~/.agents 在場時成立。
 # CI 環境沒有 ~/.agents（見 .github/workflows/ci.yml 的分工說明）：那裡只驗 symlink
-# 形狀（第 43-56 行），目標存在性由本機 `agents-sync --doctor` 負責。缺這道守衛時
-# 94 條 link 會全數誤判 FAIL——2026-08-01 run 30671830610 實證。
+# 形狀（§2），目標存在性由本機 `agents-sync --doctor` 負責。缺這道守衛時
+# 全部 skill link 會一併誤判 FAIL——2026-08-01 run 30671830610 實證（當時 94 條）。
 shared_skills="${SHARED_SKILLS_ROOT:-$HOME/.agents/skills}"
 if [ ! -d "$shared_skills" ]; then
   printf '  SKIP  shared source 不可得（%s）；link 目標存在性由本機 agents-sync --doctor 負責\n' "$shared_skills"
@@ -395,17 +395,31 @@ else
   bad "kernel 不在此環境且 CLAUDE.md 缺 dev-workflow 指標（routing 完全斷鏈）"
 fi
 
-if rg -q 'superpowers:|mp-(diagnose|grill-with-docs|improve-codebase-architecture|tdd)' CLAUDE.md; then
-  bad "CLAUDE.md 仍引用 legacy workflow"
-else
-  ok "CLAUDE.md legacy workflow refs = 0"
-fi
-
-if ! rg -q '<tone_preference>' CLAUDE.md; then
-  ok "CLAUDE.md 無重複 tone block"
-else
-  bad "CLAUDE.md 仍含重複 tone block"
-fi
+# CLAUDE.md 禁用片語：曾被刪掉、不得回流的條文。一份清單一個迴圈，紅了點名是哪一條回流；新增禁用片語
+# ＝清單多一項，不是多開一個 if 區塊（2026-09-05 前四處各自一段，其中一條藏在 Opus 5 autonomy 的合取裡，
+# 紅了只印「delegation routing 漂移」）。用 grep -F 不用 rg：本段在後段的 command -v rg 守衛之前，缺 rg
+# 時反向斷言會極性假綠（CI 缺 rg 那次的形狀）。失效方向：命中即紅；grep rc≥2（CLAUDE.md 不可讀）也紅、
+# 不冒充通過（同 §8 的掃描失敗處置）；只有全數未命中才印一條彙總 ok（同 §2／§5 的 per-item bad 形狀）。
+# 只擋逐字回流，換句話會靜默放行——那要靠審查。各條來源：
+#   superpowers: / mp-*              legacy workflow 名，已由 dev-workflow kernel 取代
+#   <tone_preference>                曾與 harness 重複的 tone block
+#   宣告接下來要做什麼               narration suppressor，與 harness progress line 衝突（#53）
+#   …不派 subagent / 不拆多個 subagent / S5 以外不另派 subagent
+#                                    Opus 5 delegation 特例，已由 shared [INT-4] routing 取代
+forbidden_phrases=('superpowers:' 'mp-diagnose' 'mp-grill-with-docs' 'mp-improve-codebase-architecture' 'mp-tdd'
+                   '<tone_preference>' '宣告接下來要做什麼'
+                   '幾個 tool call 可完成的工作不派 subagent' '單一小任務不拆多個 subagent' 'S5 以外不另派 subagent')
+phrase_bad=0
+for phrase in "${forbidden_phrases[@]}"; do
+  grep -Fq -- "$phrase" CLAUDE.md
+  grep_rc=$?
+  case "$grep_rc" in
+    0) bad "CLAUDE.md 回流禁用片語: $phrase"; phrase_bad=$((phrase_bad+1)) ;;
+    1) ;;
+    *) bad "禁用片語掃描失敗（grep rc=${grep_rc}）——不當作通過: $phrase"; phrase_bad=$((phrase_bad+1)) ;;
+  esac
+done
+[ "$phrase_bad" -eq 0 ] && ok "CLAUDE.md 無禁用片語：${#forbidden_phrases[@]} 條全數未回流"
 
 if rg -q '^確信：高 / 中 / 低$' agents/uiux-reviewer.md &&
    rg -q '^處置：一定要修 / 修了更好$' agents/uiux-reviewer.md &&
@@ -448,20 +462,11 @@ fi
 
 # 2026-09-05 對照官方 Fable 5.1／Opus 5 prompting guide 的兩處 delta。正向：surgical-edit 行是官方
 # 「targeted edits over whole-file rewrites」的 host 落點（auto mode 的 heredoc 改檔正推向整檔重寫）。
-# 反向：「宣告接下來要做什麼的首句」是寫給愛碎念舊模型的 narration suppressor，與 harness 每 session
-# 注入的 progress line 直接衝突，Fable 5.1 本就少報進度；官方要求先移除這類句子。回流即紅。
-# 改寫 surgical-edit 行時同步本斷言。換句話的 suppressor（「先說明要做什麼」之類）會靜默放行——那要靠審查。
+# 反向檢查（narration suppressor 不得回流）併在 §6 的禁用片語清單裡，理由寫在那裡。改寫 surgical-edit 行時同步本斷言。
 if grep -Fqx -- '- 改檔以 surgical edit 為準；結果相同時不整檔重寫。' CLAUDE.md; then
   ok "CLAUDE.md 保留 surgical-edit 行"
 else
   bad "CLAUDE.md 缺 surgical-edit 行（官方 Fable 5.1 targeted-edit delta）"
-fi
-# 反向 pin 用 grep -Fq 不用 rg：此處在後段的 command -v rg 守衛之前，缺 rg 時 rg 非零退出會走 else
-# 印 PASS（極性假綠，同 CI 缺 rg 那次的形狀）；grep 是 POSIX 必備，子字串比對也不需要 regex。
-if grep -Fq -- '宣告接下來要做什麼' CLAUDE.md; then
-  bad "CLAUDE.md 回流 narration suppressor「宣告接下來要做什麼」——與 harness progress line 衝突"
-else
-  ok "CLAUDE.md 無 narration suppressor"
 fi
 
 # CONVENTIONS 規則 11 的 host 一側。必須用 find 不得用 ls + glob：後者在 zsh 下任一
@@ -2041,13 +2046,14 @@ else
   bad "CLAUDE.md 缺 S5 apply pass 綁定，或改成就地複製 kernel 的 method"
 fi
 
+# 「不派 subagent」三條特例的反向檢查已移到 §6 的禁用片語清單（紅了會點名是哪一條）；這裡只剩正向 pin，
+# 所以訊息不再宣稱「僅」——那道「無其他特例」的守衛在 §6，不在此處。
 if rg -Fq '已核准 scope 內的 local、reversible 工作 MUST 一次執行至完成' CLAUDE.md &&
    rg -Fq '中斷條件依 shared [INT-8]' CLAUDE.md &&
    rg -Fq '工具被拒／環境不可用' CLAUDE.md &&
    rg -Fq 'publication 與 protected side effect 仍走 `dev-workflow` authorization gate' CLAUDE.md &&
-   grep -Fqx -- '- Delegation：依 shared `dev-workflow` [INT-4] 由 AI 自主判定，無須另問。' CLAUDE.md &&
-   ! rg -q '幾個 tool call 可完成的工作不派 subagent|單一小任務不拆多個 subagent|S5 以外不另派 subagent' CLAUDE.md; then
-  ok "Opus 5 autonomy 為祈使句；中斷條件轉介 shared INT-8 且保留工具／環境阻塞；publication gate 保留；delegation 僅由 shared INT-4 routing"
+   grep -Fqx -- '- Delegation：依 shared `dev-workflow` [INT-4] 由 AI 自主判定，無須另問。' CLAUDE.md; then
+  ok "Opus 5 autonomy 為祈使句；中斷條件轉介 shared INT-8 且保留工具／環境阻塞；publication gate 保留；delegation 指向 shared INT-4 routing（「僅」由 §6 禁用片語清單守）"
 else
   bad "Opus 5 risk-based autonomy 或 shared delegation routing 漂移"
 fi
