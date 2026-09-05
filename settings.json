@@ -174,7 +174,7 @@
           {
             "type": "command",
             "command": "bash ~/.claude/hooks/drift-check.sh",
-            "timeout": 10,
+            "timeout": 30,
             "async": false
           }
         ]
