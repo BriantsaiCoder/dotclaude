@@ -133,11 +133,19 @@ if [ -f settings.json ]; then
   if [ ! -d "$override_shared" ]; then
     printf '  SKIP  skillOverrides route 守衛：shared source 不可得（%s）\n' "$override_shared"
   else
+    # 先正規化路徑（去尾斜線、解 symlink），排除自身目錄用 case 的字面前綴比對而非 regex：路徑含 regex 特殊字元或
+    # SHARED_SKILLS_ROOT 帶尾斜線時，regex 前綴會失配而把「只在自身目錄命中」誤判為有 route（假綠）。
+    override_shared=$(cd "$override_shared" && pwd -P)
     unrouted_overrides=""
     for s in $OVERRIDE_SKILLS; do
-      if ! grep -rlE "(^|[^A-Za-z0-9_-])${s}([^A-Za-z0-9_-]|$)" --include='*.md' "$override_shared" CLAUDE.md rules 2>/dev/null | grep -qv "^${override_shared}/${s}/"; then
-        unrouted_overrides="${unrouted_overrides:+$unrouted_overrides }$s"
-      fi
+      route_hit=0
+      while IFS= read -r hit; do
+        case "$hit" in
+          "$override_shared/$s/"*) ;;
+          *) route_hit=1; break ;;
+        esac
+      done < <(grep -rlE "(^|[^A-Za-z0-9_-])${s}([^A-Za-z0-9_-]|$)" --include='*.md' "$override_shared" CLAUDE.md rules 2>/dev/null)
+      [ "$route_hit" -eq 1 ] || unrouted_overrides="${unrouted_overrides:+$unrouted_overrides }$s"
     done
     if [ -z "$unrouted_overrides" ]; then
       ok "skillOverrides：每支 name-only 都至少有一處名字 route（shared skills／rules／CLAUDE.md）"
