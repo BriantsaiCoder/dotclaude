@@ -25,6 +25,17 @@ pass=0; fail=0
 ok()   { printf '  PASS  %s\n' "$*"; pass=$((pass+1)); }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail+1)); }
 
+# rg 是本檔多數斷言的比對引擎。缺 rg 時 `rg -q` 一律回非 0，斷言依極性分裂：正向式誤紅、反向式
+# （`! rg -q BAD`）假綠——2026-08-01 run 30671830610 就是這樣 19 PASS／106 FAIL 卻把防線整段跳過。
+# 假綠沒有任何訊號可救，所以缺 rg 直接停：不讓後面任何一條印出 PASS，訊息指名工具。CI 的
+# 「工具就緒」step 已先擋（ci.yml），這裡守本機與非 CI 環境。形狀同檔尾的「至少跑到了」自證行：
+# suite 層級中止用無前導空白的 FAIL ＋ 直接 exit 1（hooks/drift-check.sh 的 FAIL 篩選兩種縮排都收），
+# 不走 bad()——exit 1 是這條的 load-bearing 部分，拿掉它就變成印著 FAIL 的假綠。
+if ! command -v rg >/dev/null 2>&1; then
+  printf 'FAIL  rg 不可用——本檔反向斷言在缺 rg 時會假綠，整份不執行；裝好 ripgrep 後重跑\n'
+  exit 1
+fi
+
 # ── 1. 追蹤中的 JSON 可解析，settings.json 的鍵契約 ─────────────
 # settings.json 解析失敗不會有任何提示，整份設定被當成不存在。
 # 本區與 §9 的 settings 斷言共用一條判準：harness 會寫回的鍵（/config、/model、/fast、啟動時的
@@ -397,8 +408,8 @@ fi
 
 # CLAUDE.md 禁用片語：曾被刪掉、不得回流的條文。一份清單一個迴圈，紅了點名是哪一條回流；新增禁用片語
 # ＝清單多一項，不是多開一個 if 區塊（2026-09-05 前四處各自一段，其中一條藏在 Opus 5 autonomy 的合取裡，
-# 紅了只印「delegation routing 漂移」）。用 grep -F 不用 rg：本段在後段的 command -v rg 守衛之前，缺 rg
-# 時反向斷言會極性假綠（CI 缺 rg 那次的形狀）。失效方向：命中即紅；grep rc≥2（CLAUDE.md 不可讀）也紅、
+# 紅了只印「delegation routing 漂移」）。用 grep -F 不用 rg：固定字串比對不需要 regex，且本段不依賴外部
+# 工具、自行處理 rc≥2 而 fail-closed，與檔頭的 rg 守衛在不在無關。失效方向：命中即紅；grep rc≥2（CLAUDE.md 不可讀）也紅、
 # 不冒充通過（同 §8 的掃描失敗處置）；只有全數未命中才印一條彙總 ok（同 §2／§5 的 per-item bad 形狀）。
 # 只擋逐字回流，換句話會靜默放行——那要靠審查。各條來源：
 #   superpowers: / mp-*              legacy workflow 名，已由 dev-workflow kernel 取代
@@ -606,6 +617,8 @@ fi
 # 那邊寫死掃描目錄因而漏過 skills/ 21 支；這裡改掃第 4 項已在用的檔案集（追蹤中的
 # 非 symlink .sh），新增檔案自動納入。
 VARNAME_PAT='\$[a-zA-Z_][a-zA-Z0-9_]*\P{ASCII}'
+# 檔頭的全域守衛在時本分支不會執行；本節的 rc≥2 處置本來就把 rg 缺席（rc=127）判成掃描錯誤，
+# 這個分支歷來只負責讓訊息指名工具。留作全域守衛日後被移除時的訊息品質備援，不是安全網。
 if ! command -v rg >/dev/null 2>&1; then
   bad "shell 變數名檢查需要 rg，但 rg 不可用（缺工具的失敗方向是假綠）"
 else
@@ -691,6 +704,7 @@ fi
 #
 # 上限（明講）：只管註解行。非註解行若在 jq 程式內出現 ASCII 單引號同樣會壞，但那裡是
 # jq 程式碼，jq 的字串用雙引號，出現單引號本來就是錯的且多半會當場炸開，不靠這條。
+# 同 §8：全域守衛在時本分支不執行；rc≥2 處置已 fail-closed，此分支只是訊息品質備援。
 if ! command -v rg >/dev/null 2>&1; then
   bad "註解引號檢查需要 rg，但 rg 不可用（缺工具的失敗方向是假綠）"
 else
