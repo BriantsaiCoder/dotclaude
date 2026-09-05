@@ -225,7 +225,8 @@
     "remember@claude-plugins-official": true,
     "security-guidance@claude-plugins-official": true,
     "skill-creator@claude-plugins-official": true,
-    "typescript-lsp@claude-plugins-official": true
+    "typescript-lsp@claude-plugins-official": true,
+    "diagram-design@diagram-design": true
   },
   "extraKnownMarketplaces": {
     "dotnet-agent-skills": {
@@ -244,6 +245,12 @@
       "source": {
         "source": "github",
         "repo": "DietrichGebert/ponytail"
+      }
+    },
+    "diagram-design": {
+      "source": {
+        "source": "github",
+        "repo": "cathrynlavery/diagram-design"
       }
     }
   },
@@ -378,7 +385,6 @@
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
   "autoMode": {
-    "classifyAllShell": true,
     "allow": [
       "$defaults",
       "dotnet build/test/run/watch/restore, dotnet ef migrations add",
@@ -409,6 +415,7 @@
       "Sandbox is enabled and autoAllowBashIfSandboxed is true — project workspace writable; package manager caches (npm, NuGet, .NET, Playwright browsers) and ~/.Trash also whitelisted via allowWrite. Unsandboxed retry stays available and is gated by the auto-mode classifier rather than a prompt, so unattended runs do not stall.",
       "Preferred stacks: .NET 8 / ASP.NET Core, EF Core, PostgreSQL, Vite + React/Vue, Tailwind, Docker Compose.",
       "~/.claude is the user's own dotfiles repository (remote: github.com/BriantsaiCoder/dotclaude) and ~/.agents is github.com/BriantsaiCoder/agents-config; both are public repos, so a push there is world-readable. Routine git operations in either — status, diff, add, commit, branch, push to a feature branch, pull — are ordinary maintenance of the user's own configuration, not scope escalation, even though those paths sit outside the session working directory. Writes under ~/.agents land inside the sandbox because it is in sandbox.filesystem.allowWrite, except the paths listed in sandbox.filesystem.denyWrite; under ~/.claude only .git is in allowWrite, so local git bookkeeping runs sandboxed while every other write there reaches the filesystem through the unsandboxed retry path; network git (push, fetch, pull) is observed to need that retry as well, failing inside the sandbox with `error setting certificate verify locations`. That retry is expected for ~/.claude and is not an auto-mode bypass. denyWrite is selected by one test — would editing this punch through a gate? It covers the settings and CLAUDE.md the classifier itself reads, the merge-gate binary, the hook decision layer, tier0, and the workflow kernel that defines the authorization rules. Ordinary content is deliberately left out — the other skills, ~/.claude/rules/ — because denyWrite has no \"unless the user asked for it\" escape hatch, and the $defaults Self-Modification rule already gates the widening and consent-manufacturing edits there."
-    ]
+    ],
+    "classifyAllShell": true
   }
 }
