@@ -90,25 +90,36 @@ if [ -f settings.json ]; then
   fi
 
   # skill listing 有字元預算（context 的 1%），溢位時 harness 從 skillUsage 最少用的 skill 開始剝掉 description、只留
-  # 名字，不報錯、不提示（2026-09-05 實測本機 session 17 支被剝）。下列 7 支由 ~/.agents dev-workflow S0 表／[INT-9]
-  # 或 rules/frontend-spa.md 以名字 route，description 從來不是它們的觸發路徑；顯式 name-only 把「harness 依用量
-  # 隨機決定」變成「已知決定」，把預算留給只能靠 description 觸發的 stack skill。
-  # 與 §1 檔頭判準的關係：skillOverrides 是 /skills 選單會寫回的鍵，但這 7 鍵在上述 route 前提下只有一個正確值，
+  # 名字，不報錯、不提示（2026-09-05 實測本機 session 17 支被剝）。下列 13 支以名字 route——7 支由 ~/.agents
+  # dev-workflow S0 表／[INT-9] 或 rules/frontend-spa.md 點名，6 支是其他 skill description 的「→ name」
+  # disambiguator 目標（nuxt←vue、vite↔vitest、postgresql-optimization←postgresql-best-practices、
+  # tailwind-v4-shadcn←css-ui、testing-library-react←jest）——description 從來不是它們的觸發路徑；顯式
+  # name-only 把「harness 依用量隨機決定」變成「已知決定」，把預算留給只能靠 description 觸發的 stack skill。
+  # 與 §1 檔頭判準的關係：skillOverrides 是 /skills 選單會寫回的鍵，但這些鍵在上述 route 前提下只有一個正確值，
   # 與 ultracode 同理——在 /skills 把任一支切回 on 就是 drift，紅燈是要的訊號；map 其餘鍵（選單寫回）不釘。
   # 同名 plugin skill（microsoft-docs@claude-plugins-official 出貨的 microsoft-docs／microsoft-code-reference）不受
   # skillOverrides 影響（schema 註記），本鍵只覆蓋 skills/ 的 user-level copy。
   # 失效方向：jq 缺席／壞 JSON／skillOverrides 非 object／任一鍵缺或值非 name-only 皆紅。
-  OVERRIDE_SKILLS='security-audit shared-security-review research microsoft-docs microsoft-code-reference tdd web-design-reviewer'
+  OVERRIDE_SKILLS='security-audit shared-security-review research microsoft-docs microsoft-code-reference tdd web-design-reviewer nuxt vite vitest postgresql-optimization tailwind-v4-shadcn testing-library-react-best-practices'
+  # A/B（2026-09-05 起，2026-10-03 決策）：4 支 0 用量、無任何名字 route（kernel／rules／其他 description 皆無），
+  # 依五軸 Step 6 先 temp-disable 再談 Delete。user-invocable-only = 對 Claude 不可見（listing 零成本）但 /name 仍可手動叫，
+  # 期間若有人手動叫就是「缺」的訊號。期滿三選一：刪 skill（連 override 一起刪）、恢復 on、或延長並改此日期。
+  AB_HIDDEN_SKILLS='next-best-practices prototype react-router-framework-mode speak-human-tw'
   # 名單以 --arg 傳入再 split：與同檔其他 jq 呼叫同形（檔名當最後一個參數），不依賴 --args 的位置語意。
   if jq -e --arg list "$OVERRIDE_SKILLS" '[.skillOverrides[($list | split(" "))[]]] | all(. == "name-only")' settings.json >/dev/null; then
     ok "skillOverrides：以名字 route 的 skill 釘為 name-only（${OVERRIDE_SKILLS}）"
   else
     bad "settings.json 的 skillOverrides 必須把下列每支設為 name-only（缺鍵、值不符、jq 缺席或檔案不可解析）：${OVERRIDE_SKILLS}"
   fi
+  if jq -e --arg list "$AB_HIDDEN_SKILLS" '[.skillOverrides[($list | split(" "))[]]] | all(. == "user-invocable-only")' settings.json >/dev/null; then
+    ok "skillOverrides：A/B 停用中的 skill 對 Claude 不可見（${AB_HIDDEN_SKILLS}）"
+  else
+    bad "settings.json 的 skillOverrides 必須把 A/B 名單設為 user-invocable-only（缺鍵、值不符、jq 缺席或檔案不可解析）：${AB_HIDDEN_SKILLS}；A/B 結束請同時改此斷言"
+  fi
   # override 鍵必須有對應的 skills/<name> symlink，否則是死鍵。只驗 link 存在不驗目標（CI 無 ~/.agents，同 §2 判準）；
   # 目標存在性由下方 shared source 一節在本機負責。symlink 被 agents-sync prune 後這條會紅，逼人同步清 override。
   missing_override_targets=""
-  for s in $OVERRIDE_SKILLS; do
+  for s in $OVERRIDE_SKILLS $AB_HIDDEN_SKILLS; do
     [ -L "skills/$s" ] || missing_override_targets="${missing_override_targets:+$missing_override_targets }$s"
   done
   if [ -z "$missing_override_targets" ]; then

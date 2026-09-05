@@ -386,7 +386,17 @@
     "microsoft-docs": "name-only",
     "microsoft-code-reference": "name-only",
     "tdd": "name-only",
-    "web-design-reviewer": "name-only"
+    "web-design-reviewer": "name-only",
+    "nuxt": "name-only",
+    "vite": "name-only",
+    "vitest": "name-only",
+    "postgresql-optimization": "name-only",
+    "tailwind-v4-shadcn": "name-only",
+    "testing-library-react-best-practices": "name-only",
+    "next-best-practices": "user-invocable-only",
+    "prototype": "user-invocable-only",
+    "react-router-framework-mode": "user-invocable-only",
+    "speak-human-tw": "user-invocable-only"
   },
   "autoUpdatesChannel": "latest",
   "tui": "fullscreen",
