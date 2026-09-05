@@ -42,13 +42,12 @@ if [ -f settings.json ]; then
     *) bad "permissions.defaultMode 非已知值: $mode" ;;
   esac
 
-  # ultracode 曾與 workflowSizeGuideline 一起釘在這裡當成本閘門，2026-08-06 移除：它是使用者
-  # 可經 /config 或 prompt 逐次開關的偏好，開了之後 Claude Code 會寫回 settings.json，於是每次
-  # 調整都變成 CI 紅燈。workflowSizeGuideline 留著——那個鍵不會被互動操作自動寫回，釘死不會誤傷。
-  # 代價講明：本檔不再對 ultracode 被調開發警告，成本控制改由 /config 與使用者自己把關；2026-09-05 起
-  # hook 層補了執行期警示（hooks/turn-mode.sh 的 ultracode 守衛：true 時對非開發型提示多一行 steer），CI 仍不釘。
-  # 註：2.1.259 實證 /effort ultracode 是 session-only 不落檔、/config 無 ultracode 列——「互動切換會寫回」這個
-  # 移除理由在現版不成立，檔案值變 true 只會是手改／git／--settings 的 drift；要不要釘回是使用者決策。
+  # ultracode 曾與 workflowSizeGuideline 一起釘在這裡當成本閘門，2026-08-06 移除，當時理由是「使用者可經 /config
+  # 或 prompt 逐次開關，開了之後 Claude Code 會寫回 settings.json，每次調整都變 CI 紅燈」。2026-09-05 釘回（下方
+  # 獨立一條）：2.1.259 binary 實證 /effort ultracode 是 session-only 不落檔、/config 無 ultracode 列，檔案值變 true
+  # 只會是手改／git／--settings 的 drift，紅燈正是該有的訊號；#48 讓 hooks/turn-mode.sh 的「靜默＝不開 Workflow」
+  # 建立在這個鍵為 false 上，執行期訊號見該 hook 的守衛註解（#50）。失效方向：jq 缺席／壞 JSON／非 false 值皆紅，
+  # settings.json 缺檔由 §9 補紅。workflowSizeGuideline 維持釘在這裡。
   if jq -e '
     ((has("workflowSizeGuideline") | not) or .workflowSizeGuideline == "unrestricted") and
     (.enabledPlugins["context7@claude-plugins-official"] == true) and
@@ -59,6 +58,12 @@ if [ -f settings.json ]; then
     ok "Context7 只預先核准兩個 read-only tools"
   else
     bad "Context7 plugin 必須 enabled 且 permission 為兩個 exact tools；workflowSizeGuideline 須 unrestricted／unset"
+  fi
+
+  if jq -e '(has("ultracode") | not) or .ultracode == false' settings.json >/dev/null; then
+    ok "ultracode 未被設成 true（unset 或 false）"
+  else
+    bad "settings.json 的 ultracode 為 true（或檔案不可解析）——repo-state drift，改回 false；理由見上方註解"
   fi
 fi
 
@@ -979,8 +984,8 @@ if [ -f hooks/turn-mode.sh ]; then
   # 換成 STEER_ASK，selftest 仍全綠。下面前三條從 hook 外面打 stdin，各釘住一個分支輸出的字面，
   # 第四條釘大提示截斷後的尾錨；失效方向：hook 崩潰或 jq 缺席都會讓 dev／ask 兩條拿到空輸出 → 紅，不會偏綠。
   # 形狀比照 _push_probe：section 一個 fixture 目錄、每 case 一行 ok／bad（bad 印 want／got／stderr）；只判 stdout。
-  # 探針一律把 HOME 指到 fixture 目錄，本機真 settings.json 的 ultracode 值不參與紅綠（本檔對該鍵刻意不釘，
-  # 見 :45-49；檔案值變 true 只會來自手改／git／--settings，/effort ultracode 是 session-only 不落檔）。
+  # 探針一律把 HOME 指到 fixture 目錄，本機真 settings.json 的 ultracode 值不參與這幾條的紅綠——那個鍵由
+  # 上方 §1 的獨立斷言釘，這裡只驗 hook 對 true／false 各自的行為。
   tm_probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || tm_probe_dir=""
   _tm_probe() {  # $1 = 分類名 $2 = prompt $3 = 期望 stdout 含此片段，空字串＝期望 stdout 為空 [$4 = 不得含此片段]
     local want="$3" deny="${4:-}" out err
@@ -1121,14 +1126,15 @@ fi
 # 已知取捨（明講）：`/auto-mode-setup` wizard 會把 proposal 寫回
 # `autoMode.environment`（binary 實測 `autoMode:{environment:a.proposal.environment,…}`）。
 # 跑完 wizard 若超過上限，這條會紅一次。那是刻意的——wizard 一次塞進來的內容本來就
-# 該有人看過再決定留哪些。與 ultracode 當年被移除釘死（:45-48）不同：那是使用者經
-# /config 或 prompt **逐次開關**的偏好，每次調整都紅；wizard 是刻意執行的單次動作。
+# 該有人看過再決定留哪些。與 ultracode 當年被移除釘死（§1 註解；該前提 2026-09-05 已推翻、鍵已釘回，
+# 類比只取「每次正當調整都紅」）不同：那是被當成使用者經 /config 或 prompt **逐次開關**的偏好，每次調整
+# 都紅；wizard 是刻意執行的單次動作。
 #
 # **已知盲點：這條只數 entry 數，看不見 entry 內部的膨脹。** 2026-08-24 寫下這條時
 # environment[4] 是 1268 字元，2026-08-27 已是 1473，而 count 從頭到尾都是 4——上限
 # 完全沒動過。也就是說「少寫」這個激勵只作用在條目數上，把三條併成一條寫得更長反而
 # 讓這道守衛更綠。
-# 不補字數上限，理由與 ultracode（:45-48）同形：字數會隨每次正當編輯漂移，設在 1473
+# 不補字數上限，理由與 ultracode 當年被移除（§1 註解）同形：字數會隨每次正當編輯漂移，設在 1473
 # 稍上方等於下一次合理擴充就紅一次，而紅的次數多了就會被調高，調高幾輪後門檻失去意義。
 # 那正是 ultracode 當年被移除的跑步機。要擋「一條寫成一整頁」得靠 review，不是靠數字。
 #
