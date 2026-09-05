@@ -961,16 +961,39 @@ if [ -f hooks/guard-s5-ledger.sh ]; then
   fi
 fi
 
-# turn-mode（UserPromptSubmit steer）的分類案例同樣自帶 --selftest：問題型 steer／開發型與
-# 明示 opt-in 靜默。S5 round 1 指出 commit 宣稱「6 案例」但 diff 內無任何測試，regex 回歸
-# 無人守——接線後 case 跟著 hook 走，不另抄一份會漂移的期望值。
+# turn-mode（UserPromptSubmit steer）的分類案例同樣自帶 --selftest：問題型 ask steer／開發型
+# dev steer（ultracode 已關，dev 視同該回合 opt-in）／明示 opt-in 與機械任務靜默。S5 round 1 指出
+# commit 宣稱「6 案例」但 diff 內無任何測試，regex 回歸無人守——接線後 case 跟著 hook 走，不另抄
+# 一份會漂移的期望值。
 if [ -f hooks/turn-mode.sh ]; then
   if _tm_out=$(bash hooks/turn-mode.sh --selftest 2>&1); then
-    ok "turn-mode selftest: $(printf '%s' "$_tm_out" | tail -1)"
+    ok "$(printf '%s' "$_tm_out" | tail -1)"
   else
     printf '%s\n' "$_tm_out" | tail -5
     bad "turn-mode selftest 失敗（上列為輸出末段）"
   fi
+  # 主路徑（stdin JSON → jq → classify → case 分派）不在 --selftest 射程內：S5 實測把 dev 分支
+  # 換成 STEER_ASK，selftest 仍全綠。下面前三條從 hook 外面打 stdin，各釘住一個分支輸出的字面，
+  # 第四條釘大提示截斷後的尾錨；失效方向：hook 崩潰或 jq 缺席都會讓 dev／ask 兩條拿到空輸出 → 紅，不會偏綠。
+  # 形狀比照 _push_probe：每個 case 各出一行 ok／bad，bad 印 want／got 與 stderr，紅的時候不用重跑才知道
+  # 是哪一條、hook 實際吐了什麼；只判 stdout，stderr 雜訊不算失敗但會印出來。
+  _tm_probe() {  # $1 = 分類名 $2 = prompt $3 = 期望 stdout 含此片段，空字串＝期望 stdout 為空
+    local want="$3" out err errf
+    errf=$(mktemp "${TMPDIR:-/tmp}/tm-probe.XXXXXX") ||
+      { bad "turn-mode 主路徑 $1：mktemp 失敗，無法收 stderr"; return; }
+    out=$({ jq -nc --arg p "$2" '{prompt:$p}' | bash hooks/turn-mode.sh; } 2>"$errf")
+    err=$(cat "$errf" 2>/dev/null); rm -f "$errf"
+    if { [ -z "$want" ] && [ -z "$out" ]; } || { [ -n "$want" ] && [[ "$out" == *"$want"* ]]; }; then
+      ok "turn-mode 主路徑 $1 → ${want:-無輸出}"
+    else
+      bad "turn-mode 主路徑 $1 want=«${want:-無輸出}» got=«${out:0:80}»${err:+ stderr=«${err:0:80}»}: ${2:0:60}"
+    fi
+  }
+  _tm_probe dev    '審查這個 PR 的 Standards 與 Spec 兩軸' '開發型任務'
+  _tm_probe ask    '為何 build 失敗' '問題／分析型'
+  _tm_probe silent '安裝https://github.com/cathrynlavery/diagram-design' ''
+  # 超過 8K 的提示只掃頭尾各 4K（效能），$ 錨必須留在真正的串尾：貼 9K log 再問「審查過了嗎」仍要是 ask
+  _tm_probe big    "$(printf 'x%.0s' $(seq 1 9000))"$'\n審查過了嗎' '問題／分析型'
 fi
 
 # 行為案例只在條件真的成立時才跑：/tmp 可寫就重現不了，標 SKIP 而不是給一個

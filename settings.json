@@ -367,7 +367,7 @@
   },
   "alwaysThinkingEnabled": true,
   "effortLevel": "xhigh",
-  "ultracode": true,
+  "ultracode": false,
   "advisorModel": "opus",
   "fastMode": true,
   "autoUpdatesChannel": "latest",
