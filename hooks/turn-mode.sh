@@ -5,9 +5,9 @@
 #       「只在明示 opt-in 才可用」；本 hook 對開發型樣式注入「本回合視同 opt-in」，其餘提示靜默＝不開。
 #       預設翻轉的理由：heuristic 一定會漏。漏判開發型只是少開一次 Workflow（補打 ultracode 即可）；
 #       漏判非開發型（安裝 plugin 那次）卻是 12 agent、18 分鐘。把失效方向壓到便宜的那一邊。
-#       ultracode 關閉的連帶（settings.json 不能帶註解，記這裡）：effortLevel xhigh 不動但有效 effort 是否受模型
-#       default hold 未驗，觀察到降級用 /effort xhigh 釘回；concurrent subagent 上限回 20（binary 確認），dev steer
-#       只影響 model 層編排決定、恢復不了那個豁免。
+#       ultracode 關閉的連帶（settings.json 不能帶註解，記這裡）：effortLevel xhigh 不動且生效——哪些世代有 model-default
+#       hold 會蓋掉持久 effortLevel，以 https://code.claude.com/docs/en/model-config 為準（2026-09-05 查：現用 Opus 5／
+#       Fable 5.1 無 hold）；concurrent subagent 上限回 20（binary 確認），dev steer 只影響 model 層編排決定、恢復不了那個豁免。
 # 規則只活在這支 hook（~/.claude/CLAUDE.md 受 byte 軟閘限制，餘裕放不下一條規則），注入文自帶出處供稽核回查。
 # 行為：問題型樣式 → ask steer（單代理直答）；開發型樣式 → dev steer（視同 opt-in）；明示 opt-in
 #       （ultracode／use a workflow）由 harness 自己認得，hook 靜默；其餘靜默——安裝／設定／更新等機械任務、
@@ -20,12 +20,12 @@
 #       `git log --grep=refactor` 這種含 DEV 名詞的機械指令會判 dev——ERE 沒有 lookbehind，加指令前綴白名單是把
 #       shell 知識塞進分類器，不做；靠 steer 的「單代理能收斂就不編排」兜底。
 # 純 heuristic、advisory：不擋任何動作。失效方向：無 jq／payload 讀不到 → 靜默 → 不開 Workflow（便宜側）。
-# ultracode 守衛：「silent＝不開 Workflow」建立在 settings.json ultracode=false 上，而 repo-integrity 自 2026-08-06 起
-#       刻意不釘該鍵。2.1.259 binary 實證：/effort ultracode 是 session-only 不落檔、/config 沒有 ultracode 列，檔案值變 true
-#       只會來自手改／git（revert、checkout 舊 commit）／--settings，屬 repo-state drift；本守衛覆蓋的是這種 drift，
-#       不覆蓋 session 內的 /effort ultracode。放在每回合而非 SessionStart 的理由只有一個：steer 每回合重注入，撐得過 /compact。
-#       做法：silent 類提示多讀一次 settings（jq，約 3 ms），true 就補一行 steer；讀不到或 jq 失敗 → 不警示（偏貴側）。
-#       ponytail: 只讀 user scope 的 ~/.claude/settings.json；project／managed scope 的 ultracode:true 不覆蓋。
+# ultracode 守衛：「silent＝不開 Workflow」建立在 settings.json ultracode=false 上；repo-integrity §1 釘該鍵（CI 紅），
+#       但本機 SessionStart 的 drift-check 只以 exit-0 stderr 報警、只進 debug log，所以本守衛是 drift 後唯一每回合可見
+#       的訊號，且覆蓋 session 中途 git checkout／revert 造成的 drift（SessionStart 只在 startup／resume／clear／compact／
+#       fork 跑）。檔案值為 true 只會是 repo-state drift（實證見 repo-integrity §1
+#       註解）；session 內的 /effort ultracode 不落檔、不在射程。做法：silent 類提示多讀一次 settings（jq，約 3 ms），
+#       true 就補一行 steer；讀不到或 jq 失敗 → 不警示（偏貴側）。ponytail: 只讀 user scope，project／managed 不覆蓋。
 # 整串比對用 bash [[ =~ ]]（$ 錨串尾而非逐行；nocasematch 讓英文樣式不分大小寫）。ASK 先於 DEV：
 # 「審查這個 PR 是否有問題」「審查過了嗎」「重構後會不會壞掉」是問句不是編排：DEV 進場後 ASK 漏判的代價從「靜默」
 # 升為「開 Workflow」，所以 ASK 比 #47 寬——成員看 regex 本身，不在此重抄；句尾組列成 嗎|呢|沒|沒有 四個成員而不用
