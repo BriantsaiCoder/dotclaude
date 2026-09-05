@@ -88,6 +88,34 @@ if [ -f settings.json ]; then
   else
     bad "settings.json 的 fastModePerSessionOptIn 必須為 true（現值非 true、缺鍵、jq 缺席或檔案不可解析）——否則 fast mode 會以 usage credits 自動起跑"
   fi
+
+  # skill listing 有字元預算（context 的 1%），溢位時 harness 從 skillUsage 最少用的 skill 開始剝掉 description、只留
+  # 名字，不報錯、不提示（2026-09-05 實測本機 session 17 支被剝）。下列 7 支由 ~/.agents dev-workflow S0 表／[INT-9]
+  # 或 rules/frontend-spa.md 以名字 route，description 從來不是它們的觸發路徑；顯式 name-only 把「harness 依用量
+  # 隨機決定」變成「已知決定」，把預算留給只能靠 description 觸發的 stack skill。
+  # 與 §1 檔頭判準的關係：skillOverrides 是 /skills 選單會寫回的鍵，但這 7 鍵在上述 route 前提下只有一個正確值，
+  # 與 ultracode 同理——在 /skills 把任一支切回 on 就是 drift，紅燈是要的訊號；map 其餘鍵（選單寫回）不釘。
+  # 同名 plugin skill（microsoft-docs@claude-plugins-official 出貨的 microsoft-docs／microsoft-code-reference）不受
+  # skillOverrides 影響（schema 註記），本鍵只覆蓋 skills/ 的 user-level copy。
+  # 失效方向：jq 缺席／壞 JSON／skillOverrides 非 object／任一鍵缺或值非 name-only 皆紅。
+  OVERRIDE_SKILLS='security-audit shared-security-review research microsoft-docs microsoft-code-reference tdd web-design-reviewer'
+  # 名單以 --arg 傳入再 split：與同檔其他 jq 呼叫同形（檔名當最後一個參數），不依賴 --args 的位置語意。
+  if jq -e --arg list "$OVERRIDE_SKILLS" '[.skillOverrides[($list | split(" "))[]]] | all(. == "name-only")' settings.json >/dev/null; then
+    ok "skillOverrides：以名字 route 的 skill 釘為 name-only（${OVERRIDE_SKILLS}）"
+  else
+    bad "settings.json 的 skillOverrides 必須把下列每支設為 name-only（缺鍵、值不符、jq 缺席或檔案不可解析）：${OVERRIDE_SKILLS}"
+  fi
+  # override 鍵必須有對應的 skills/<name> symlink，否則是死鍵。只驗 link 存在不驗目標（CI 無 ~/.agents，同 §2 判準）；
+  # 目標存在性由下方 shared source 一節在本機負責。symlink 被 agents-sync prune 後這條會紅，逼人同步清 override。
+  missing_override_targets=""
+  for s in $OVERRIDE_SKILLS; do
+    [ -L "skills/$s" ] || missing_override_targets="${missing_override_targets:+$missing_override_targets }$s"
+  done
+  if [ -z "$missing_override_targets" ]; then
+    ok "skillOverrides 的每個鍵都有 skills/<name> symlink"
+  else
+    bad "skillOverrides 鍵無對應 skills/<name> symlink：${missing_override_targets}（刪 override 或恢復 symlink）"
+  fi
 fi
 
 # ── 2. skill symlink 形狀 ─────────────────────────────────────

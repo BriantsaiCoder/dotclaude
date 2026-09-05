@@ -379,6 +379,15 @@
   "ultracode": false,
   "advisorModel": "opus",
   "fastModePerSessionOptIn": true,
+  "skillOverrides": {
+    "security-audit": "name-only",
+    "shared-security-review": "name-only",
+    "research": "name-only",
+    "microsoft-docs": "name-only",
+    "microsoft-code-reference": "name-only",
+    "tdd": "name-only",
+    "web-design-reviewer": "name-only"
+  },
   "autoUpdatesChannel": "latest",
   "tui": "fullscreen",
   "showThinkingSummaries": true,
