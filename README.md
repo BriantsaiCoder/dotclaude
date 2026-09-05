@@ -1,14 +1,14 @@
 # Claude Code 全域配置
 
-個人版控的 `~/.claude/` 設定，跨機器同步、月度審查。
+個人版控的 `~/.claude/` 設定，跨機器同步。
 
 ## 結構
 
 ```
-CLAUDE.md            # 全域偏好（< 200 行；超過 150 行觸發 review）
-rules/               # 技術棧細則，由 CLAUDE.md 用 @import 顯式載入
+CLAUDE.md            # 全域偏好（thin budget 硬閘／軟閘由 tests/repo-integrity.sh §6 定義）
+rules/               # 技術棧細則（載入方式見下）
   cpp.md / dotnet.md / frontend-spa.md / infra.md
-  testing.md / typescript.md / winforms.md
+  testing.md / typescript.md / winforms.md / cookbook.md
 templates/
   compact.md         # /compact 與 cross-session handoff 模板
 agents/              # 自訂 subagent 定義
@@ -20,15 +20,16 @@ statusline-command.sh
 playwright-mcp-config.json
 ```
 
+`rules/` 的載入不是 `@import`：各檔 frontmatter `paths:` 命中時才注入。CLAUDE.md「On-demand stack rules」段的路徑寫在反引號內，官方明定 code span 內的 `@` 不解析，所以那一段只是指標。`cookbook.md` 另有專案端顯式 `@import` 的用法，見該檔檔頭。
+
 ## 追蹤範圍
 
 `.gitignore` 採 allowlist 策略，**只追蹤上述設定檔**。執行期狀態（`history.jsonl` / `sessions/` / `projects/` / `cache/` / `agent-memory/` / `plans/` / `tasks/` / `todos/` / `telemetry/` / `*.bak.*`）一律排除，避免敏感對話與快取入庫。
 
-## 月度 review
+## Review 觸發條件
 
-CLAUDE.md 行 3 註明 `last audited` 與 `next review`；觸發條件：
-- 主檔逼近 150 行 → 拆規則進 `rules/`
-- 主檔逼近 200 行 → 重構
+事件驅動：
+- 主檔逼近軟閘 → 先瘦身或搬進 skill（`tests/repo-integrity.sh` 會紅，訊息帶實際 byte 數）
 - 同錯第二次發生 → 加進對應檔（Boris 原則）
 
 ## Pre-commit 守門
