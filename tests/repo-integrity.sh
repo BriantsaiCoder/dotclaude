@@ -90,27 +90,31 @@ if [ -f settings.json ]; then
   fi
 
   # skill listing 有字元預算（context 的 1%），溢位時 harness 從 skillUsage 最少用的 skill 開始剝掉 description、只留
-  # 名字，不報錯、不提示（2026-09-05 實測本機 session 17 支被剝）。下列 7 支由 ~/.agents dev-workflow S0 表或
-  # rules 以名字 route，description 從來不是它們的觸發路徑；顯式 name-only 把「harness 依用量隨機決定」變成
-  # 「已知決定」，把預算留給只能靠 description 觸發的 stack skill。只釘這 7 個鍵的值，不釘 map 其餘內容
-  # （/skills 選單會寫入其他鍵）。失效方向：jq 缺席／壞 JSON／任一鍵缺或值非 name-only 皆紅。
-  if jq -e '
-    [.skillOverrides["security-audit","shared-security-review","research","microsoft-docs","microsoft-code-reference","tdd","web-design-reviewer"]]
-    | length == 7 and all(. == "name-only")
-  ' settings.json >/dev/null; then
-    ok "skillOverrides：7 支以名字 route 的 skill 釘為 name-only"
+  # 名字，不報錯、不提示（2026-09-05 實測本機 session 17 支被剝）。下列 7 支由 ~/.agents dev-workflow S0 表／[INT-9]
+  # 或 rules/frontend-spa.md 以名字 route，description 從來不是它們的觸發路徑；顯式 name-only 把「harness 依用量
+  # 隨機決定」變成「已知決定」，把預算留給只能靠 description 觸發的 stack skill。
+  # 與 §1 檔頭判準的關係：skillOverrides 是 /skills 選單會寫回的鍵，但這 7 鍵在上述 route 前提下只有一個正確值，
+  # 與 ultracode 同理——在 /skills 把任一支切回 on 就是 drift，紅燈是要的訊號；map 其餘鍵（選單寫回）不釘。
+  # 同名 plugin skill（microsoft-docs@claude-plugins-official 出貨的 microsoft-docs／microsoft-code-reference）不受
+  # skillOverrides 影響（schema 註記），本鍵只覆蓋 skills/ 的 user-level copy。
+  # 失效方向：jq 缺席／壞 JSON／skillOverrides 非 object／任一鍵缺或值非 name-only 皆紅。
+  OVERRIDE_SKILLS='security-audit shared-security-review research microsoft-docs microsoft-code-reference tdd web-design-reviewer'
+  # shellcheck disable=SC2086  # 刻意以空白拆成 positional args
+  if jq -e '[.skillOverrides[$ARGS.positional[]]] | all(. == "name-only")' settings.json --args $OVERRIDE_SKILLS >/dev/null; then
+    ok "skillOverrides：以名字 route 的 skill 釘為 name-only（${OVERRIDE_SKILLS}）"
   else
-    bad "settings.json 的 skillOverrides 必須把 security-audit／shared-security-review／research／microsoft-docs／microsoft-code-reference／tdd／web-design-reviewer 設為 name-only（缺鍵、值不符、jq 缺席或檔案不可解析）"
+    bad "settings.json 的 skillOverrides 必須把下列每支設為 name-only（缺鍵、值不符、jq 缺席或檔案不可解析）：${OVERRIDE_SKILLS}"
   fi
-  # name-only 指向不存在的 skill 是死鍵：symlink 被 agents-sync prune 後這條會紅，逼人同步清 override。
+  # override 鍵必須有對應的 skills/<name> symlink，否則是死鍵。只驗 link 存在不驗目標（CI 無 ~/.agents，同 §2 判準）；
+  # 目標存在性由下方 shared source 一節在本機負責。symlink 被 agents-sync prune 後這條會紅，逼人同步清 override。
   missing_override_targets=""
-  for s in security-audit shared-security-review research microsoft-docs microsoft-code-reference tdd web-design-reviewer; do
-    [ -L "skills/$s" ] || missing_override_targets="$missing_override_targets $s"
+  for s in $OVERRIDE_SKILLS; do
+    [ -L "skills/$s" ] || missing_override_targets="${missing_override_targets:+$missing_override_targets }$s"
   done
   if [ -z "$missing_override_targets" ]; then
-    ok "skillOverrides 的 7 個目標都有 skills/<name> symlink"
+    ok "skillOverrides 的每個鍵都有 skills/<name> symlink"
   else
-    bad "skillOverrides 指向不存在的 skill：${missing_override_targets}（刪 override 或恢復 symlink）"
+    bad "skillOverrides 鍵無對應 skills/<name> symlink：${missing_override_targets}（刪 override 或恢復 symlink）"
   fi
 fi
 
