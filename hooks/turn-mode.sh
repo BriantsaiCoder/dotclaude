@@ -20,10 +20,10 @@
 #       `git log --grep=refactor` 這種含 DEV 名詞的機械指令會判 dev——ERE 沒有 lookbehind，加指令前綴白名單是把
 #       shell 知識塞進分類器，不做；靠 steer 的「單代理能收斂就不編排」兜底。
 # 純 heuristic、advisory：不擋任何動作。失效方向：無 jq／payload 讀不到 → 靜默 → 不開 Workflow（便宜側）。
-# ultracode 守衛：「silent＝不開 Workflow」建立在 settings.json ultracode=false 上；repo-integrity §1 釘該鍵（CI 紅），
-#       但本機 SessionStart 的 drift-check 只以 exit-0 stderr 報警、只進 debug log，所以本守衛是 drift 後唯一每回合可見
-#       的訊號，且覆蓋 session 中途 git checkout／revert 造成的 drift（SessionStart 只在 startup／resume／clear／compact／
-#       fork 跑）。檔案值為 true 只會是 repo-state drift（實證見 repo-integrity §1
+# ultracode 守衛：「silent＝不開 Workflow」建立在 settings.json ultracode=false 上；repo-integrity §1 釘該鍵（CI 與
+#       本機 SessionStart 都會報）。本守衛補兩個缺口：每回合重注入，以及 session 中途
+#       git checkout／revert 造成的 drift（SessionStart 只在 startup／resume／clear／compact／fork 跑）。
+#       檔案值為 true 只會是 repo-state drift（實證見 repo-integrity §1
 #       註解）；session 內的 /effort ultracode 不落檔、不在射程。做法：silent 類提示多讀一次 settings（jq，約 3 ms），
 #       true 就補一行 steer；讀不到或 jq 失敗 → 不警示（偏貴側）。ponytail: 只讀 user scope，project／managed 不覆蓋。
 # 整串比對用 bash [[ =~ ]]（$ 錨串尾而非逐行；nocasematch 讓英文樣式不分大小寫）。ASK 先於 DEV：
