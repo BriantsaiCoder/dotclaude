@@ -5,7 +5,7 @@
 # 為什麼是這九項：每一項都對應一種「壞掉但不會有錯誤訊息」的失效模式。
 # 會噴錯的東西不需要 CI 擋，會靜默失效的才需要。編號與內文 section 一一對應。
 #
-#   1. JSON 解析     settings.json 壞掉時整份被靜默忽略，不是報錯
+#   1. settings 契約 settings.json 壞掉時整份被靜默忽略，鍵漂移也不報錯
 #   2. skill symlink 斷鏈或指錯位置會讓共用 skill 靜默換掉或消失
 #   3. agent 定義    frontmatter 有 name 但缺 description 的檔案永遠不會載入
 #   4. shellcheck    hook 是 PreToolUse 攔截器，語法錯等於防線失效
@@ -25,8 +25,11 @@ pass=0; fail=0
 ok()   { printf '  PASS  %s\n' "$*"; pass=$((pass+1)); }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail+1)); }
 
-# ── 1. 所有追蹤中的 JSON 可解析 ────────────────────────────────
+# ── 1. 追蹤中的 JSON 可解析，settings.json 的鍵契約 ─────────────
 # settings.json 解析失敗不會有任何提示，整份設定被當成不存在。
+# 本區與 §9 的 settings 斷言共用一條判準：harness 會寫回的鍵（/config、/model、/fast、啟動時的
+# 正規化）一律只釘語意不釘單一值——unset-or-good（ultracode、alwaysThinkingEnabled）或 allowed set
+# （model、effortLevel）；釘死字面值等於把使用者的正常操作當 drift，每次寫回都是紅燈。
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   if err=$(jq empty "$f" 2>&1); then ok "JSON 可解析: $f"
@@ -64,6 +67,15 @@ if [ -f settings.json ]; then
     ok "ultracode 未被設成 true（unset 或 false）"
   else
     bad "settings.json 的 ultracode 必須 unset 或 false（現值不是 false，或檔案不可解析）——repo-state drift，改回 false；理由見上方註解"
+  fi
+
+  # fast mode 只在 Opus 5／4.8 生效且訂閱制下全走 usage credits；每個 session 以 standard 起跑，
+  # 要快就在 session 第一回合 /fast。依本區開頭的判準只釘 opt-in 鍵：起跑判定在此鍵為 true 時忽略
+  # fastMode（2.1.259 實證），而 /fast 會把 fastMode: true 寫回。失效方向：jq 缺席／壞 JSON／非 true 值皆紅。
+  if jq -e '.fastModePerSessionOptIn == true' settings.json >/dev/null; then
+    ok "fast mode 需每 session 明示 opt-in（fastModePerSessionOptIn）"
+  else
+    bad "settings.json 缺 fastModePerSessionOptIn: true——fast mode 會以 usage credits 自動起跑"
   fi
 fi
 
@@ -432,6 +444,22 @@ if grep -Fqx -- '- Delegation：依 shared `dev-workflow` [INT-4] 由 AI 自主�
   ok "Claude delegation 保持 thin 並指向 shared INT-4"
 else
   bad "Claude delegation adapter 必須只保留 shared [INT-4]、AI 自主判定與無須另問"
+fi
+
+# 2026-09-05 對照官方 Fable 5.1／Opus 5 prompting guide 的兩處 delta。正向：surgical-edit 行是官方
+# 「targeted edits over whole-file rewrites」的 host 落點（auto mode 的 heredoc 改檔正推向整檔重寫）。
+# 反向：「宣告接下來要做什麼的首句」是寫給愛碎念舊模型的 narration suppressor，與 harness 每 session
+# 注入的 progress line 直接衝突，Fable 5.1 本就少報進度；官方要求先移除這類句子。回流即紅。
+# 改寫 surgical-edit 行時同步本斷言。換句話的 suppressor（「先說明要做什麼」之類）會靜默放行——那要靠審查。
+if grep -Fqx -- '- 改檔以 surgical edit 為準；結果相同時不整檔重寫。' CLAUDE.md; then
+  ok "CLAUDE.md 保留 surgical-edit 行"
+else
+  bad "CLAUDE.md 缺 surgical-edit 行（官方 Fable 5.1 targeted-edit delta）"
+fi
+if rg -q '宣告接下來要做什麼' CLAUDE.md; then
+  bad "CLAUDE.md 回流 narration suppressor「宣告接下來要做什麼」——與 harness progress line 衝突"
+else
+  ok "CLAUDE.md 無 narration suppressor"
 fi
 
 # CONVENTIONS 規則 11 的 host 一側。必須用 find 不得用 ls + glob：後者在 zsh 下任一
@@ -2015,13 +2043,18 @@ fi
 #   * `default` 分支自 v2.1.197 起實際解析成 Sonnet 5，所以「擋得住降級到 sonnet」只對
 #     明示字串成立，對 `default` 不成立。這是 main 既有的逃生口，本次未動；要收緊是
 #     獨立決定。
+#
+# 2026-09-05：thinking 改釘「unset 或 true」（§1 開頭的 unset-or-good 判準，形狀同 ultracode）。
+# binary schema 原文 "When false, thinking is disabled. When absent or true, thinking is enabled"，
+# /config 開啟 thinking 寫回的是刪鍵不是 true；官方 model-config 頁另載此鍵對 Fable 5.1 無效。
+# 擋的仍是掉到 false（含手改成 "false"／0 之類非 true 的值）。
 if jq -e '
   (.model == "default" or (.model | ascii_downcase | test("^(claude-)?opus([-\\[]|$)"))) and
   .advisorModel == "opus" and
   (.effortLevel == "high" or .effortLevel == "xhigh") and
-  .alwaysThinkingEnabled == true
+  ((has("alwaysThinkingEnabled") | not) or .alwaysThinkingEnabled == true)
 ' settings.json 2>/dev/null >/dev/null; then
-  ok "Claude main model 在允許集合內；advisor=opus；effort≥high；thinking 啟用"
+  ok "Claude main model 在允許集合內；advisor=opus；effort≥high；thinking 未關閉"
 else
   bad "Claude model／advisor／effort／thinking contract 漂移"
 fi
