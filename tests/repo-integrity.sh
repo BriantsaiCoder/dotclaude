@@ -99,8 +99,8 @@ if [ -f settings.json ]; then
   # skillOverrides 影響（schema 註記），本鍵只覆蓋 skills/ 的 user-level copy。
   # 失效方向：jq 缺席／壞 JSON／skillOverrides 非 object／任一鍵缺或值非 name-only 皆紅。
   OVERRIDE_SKILLS='security-audit shared-security-review research microsoft-docs microsoft-code-reference tdd web-design-reviewer'
-  # shellcheck disable=SC2086  # 刻意以空白拆成 positional args
-  if jq -e '[.skillOverrides[$ARGS.positional[]]] | all(. == "name-only")' settings.json --args $OVERRIDE_SKILLS >/dev/null; then
+  # 名單以 --arg 傳入再 split：與同檔其他 jq 呼叫同形（檔名當最後一個參數），不依賴 --args 的位置語意。
+  if jq -e --arg list "$OVERRIDE_SKILLS" '[.skillOverrides[($list | split(" "))[]]] | all(. == "name-only")' settings.json >/dev/null; then
     ok "skillOverrides：以名字 route 的 skill 釘為 name-only（${OVERRIDE_SKILLS}）"
   else
     bad "settings.json 的 skillOverrides 必須把下列每支設為 name-only（缺鍵、值不符、jq 缺席或檔案不可解析）：${OVERRIDE_SKILLS}"
