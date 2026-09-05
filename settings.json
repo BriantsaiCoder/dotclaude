@@ -370,7 +370,12 @@
       "agent-browser"
     ]
   },
-  "effortLevel": "xhigh",
+  "effortLevel": "high",
+  "modelSettings": {
+    "claude-fable-5-1": {
+      "effortLevel": "xhigh"
+    }
+  },
   "ultracode": false,
   "advisorModel": "opus",
   "fastModePerSessionOptIn": true,
