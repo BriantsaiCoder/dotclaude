@@ -63,7 +63,7 @@ if [ -f settings.json ]; then
   if jq -e '(has("ultracode") | not) or .ultracode == false' settings.json >/dev/null; then
     ok "ultracode 未被設成 true（unset 或 false）"
   else
-    bad "settings.json 的 ultracode 為 true（或檔案不可解析）——repo-state drift，改回 false；理由見上方註解"
+    bad "settings.json 的 ultracode 必須 unset 或 false（現值不是 false，或檔案不可解析）——repo-state drift，改回 false；理由見上方註解"
   fi
 fi
 

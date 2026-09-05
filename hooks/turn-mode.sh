@@ -5,9 +5,9 @@
 #       「只在明示 opt-in 才可用」；本 hook 對開發型樣式注入「本回合視同 opt-in」，其餘提示靜默＝不開。
 #       預設翻轉的理由：heuristic 一定會漏。漏判開發型只是少開一次 Workflow（補打 ultracode 即可）；
 #       漏判非開發型（安裝 plugin 那次）卻是 12 agent、18 分鐘。把失效方向壓到便宜的那一邊。
-#       ultracode 關閉的連帶（settings.json 不能帶註解，記這裡）：effortLevel xhigh 不動且生效（官方 model-config 文件：
-#       Opus 5／Fable 5.1 無 model-default hold，持久 effortLevel 直接生效；有 hold 的是 Fable 5／Opus 4.8／4.7）；
-#       concurrent subagent 上限回 20（binary 確認），dev steer 只影響 model 層編排決定、恢復不了那個豁免。
+#       ultracode 關閉的連帶（settings.json 不能帶註解，記這裡）：effortLevel xhigh 不動且生效——哪些世代有 model-default
+#       hold 會蓋掉持久 effortLevel，以 https://code.claude.com/docs/en/model-config 為準（2026-09-05 查：現用 Opus 5／
+#       Fable 5.1 無 hold）；concurrent subagent 上限回 20（binary 確認），dev steer 只影響 model 層編排決定、恢復不了那個豁免。
 # 規則只活在這支 hook（~/.claude/CLAUDE.md 受 byte 軟閘限制，餘裕放不下一條規則），注入文自帶出處供稽核回查。
 # 行為：問題型樣式 → ask steer（單代理直答）；開發型樣式 → dev steer（視同 opt-in）；明示 opt-in
 #       （ultracode／use a workflow）由 harness 自己認得，hook 靜默；其餘靜默——安裝／設定／更新等機械任務、
