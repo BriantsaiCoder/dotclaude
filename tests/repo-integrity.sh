@@ -2111,10 +2111,13 @@ fi
 # 斷言連帶：只釘頂層等於釘一條 harness 已不走的路——對 staged 檔注入 `claude-opus-5: low` 實測舊斷言仍 PASS，改為
 # 頂層與 modelSettings 內每個 model 一起落在允許集合。fallback 只給 modelSettings 內**缺鍵**的條目（視同 high，那是
 # passthrough 形狀允許的空殼）——用 has() 不用 //，否則 null／false 也會被當缺值放行；值壞掉（null／false／非字串）
-# 與頂層缺鍵一律 FAIL，維持上面「擋得住掉回未指定」與 thinking 那條的 fail-closed 原意。
+# 與頂層缺鍵一律 FAIL。modelSettings 若存在必須是 object、每個 entry 也必須是 object：`[]?` 對字串／數字／陣列產空串流，
+# 斷言會退化成只看頂層，而 zod 的 `.catch(void 0)` 對壞形狀的處置正是靜默丟掉整張釘子。維持上面「擋得住掉回未指定」
+# 與 thinking 那條的 fail-closed 原意。
 if jq -e '
   (.model == "default" or (.model | ascii_downcase | test("^(claude-)?opus([-\\[]|$)"))) and
   .advisorModel == "opus" and
+  (.modelSettings == null or (.modelSettings | type == "object" and all(.[]; type == "object"))) and
   ([.effortLevel, (.modelSettings[]? | if has("effortLevel") then .effortLevel else "high" end)] | all(. == "high" or . == "xhigh")) and
   ((has("alwaysThinkingEnabled") | not) or .alwaysThinkingEnabled == true)
 ' settings.json 2>/dev/null >/dev/null; then
