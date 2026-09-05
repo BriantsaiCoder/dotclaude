@@ -2100,13 +2100,23 @@ fi
 # binary schema 原文 "When false, thinking is disabled. When absent or true, thinking is enabled"，
 # /config 開啟 thinking 寫回的是刪鍵不是 true；官方 model-config 頁另載此鍵對 Fable 5.1 無效。
 # 擋的仍是掉到 false（含手改成 "false"／0 之類非 true 的值）。
+#
+# 2026-09-05（同日，effort 分流；使用者決議）：effortLevel 回官方預設 high（所有無自帶保存值的模型，日常就是 Opus 5）；
+# modelSettings["claude-fable-5-1"].effortLevel 釘 xhigh——Fable 只在最吃能力的任務手動切，正是官方「capability-sensitive
+# 才升 xhigh」那桶。機制（binary 2.1.259）：`/effort` 寫回的是 `modelSettings[<canonical id>].effortLevel`，不碰頂層
+# `effortLevel`；同檔內 per-model 蓋 default，ultracode=true 時整張 modelSettings 被丟棄；內層鍵是 effortLevel 不是 effort。
+# key 未以測試釘住（釘 id 等於把上面剛拆掉的列舉裝回來），以 live 探針驗：ANTHROPIC_BASE_URL 指向本機 request logger、
+# `claude -p --model <alias>`，五個別名（opus／opus[1m]／claude-opus-5→high；fable／claude-fable-5-1→xhigh）皆符。失效方向
+# （使用者選定）：Fable id 換代→釘子失配→靜默落回 high，屆時在 Fable session 跑一次 /effort xhigh 即寫回新 id。
+# 斷言連帶：只釘頂層等於釘一條 harness 已不走的路——對 staged 檔注入 `claude-opus-5: low` 實測舊斷言仍 PASS，改為
+# 頂層與 modelSettings 內每個 model 一起落在允許集合（缺 effortLevel 視同 high）。
 if jq -e '
   (.model == "default" or (.model | ascii_downcase | test("^(claude-)?opus([-\\[]|$)"))) and
   .advisorModel == "opus" and
-  (.effortLevel == "high" or .effortLevel == "xhigh") and
+  ([.effortLevel, (.modelSettings[]?.effortLevel // "high")] | all(. == "high" or . == "xhigh")) and
   ((has("alwaysThinkingEnabled") | not) or .alwaysThinkingEnabled == true)
 ' settings.json 2>/dev/null >/dev/null; then
-  ok "Claude main model 在允許集合內；advisor=opus；effort≥high；thinking 未關閉"
+  ok "Claude main model 在允許集合內；advisor=opus；effort≥high（頂層與 modelSettings 每個 model）；thinking 未關閉"
 else
   bad "Claude model／advisor／effort／thinking contract 漂移"
 fi
