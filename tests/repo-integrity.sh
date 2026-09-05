@@ -88,6 +88,30 @@ if [ -f settings.json ]; then
   else
     bad "settings.json 的 fastModePerSessionOptIn 必須為 true（現值非 true、缺鍵、jq 缺席或檔案不可解析）——否則 fast mode 會以 usage credits 自動起跑"
   fi
+
+  # skill listing 有字元預算（context 的 1%），溢位時 harness 從 skillUsage 最少用的 skill 開始剝掉 description、只留
+  # 名字，不報錯、不提示（2026-09-05 實測本機 session 17 支被剝）。下列 7 支由 ~/.agents dev-workflow S0 表或
+  # rules 以名字 route，description 從來不是它們的觸發路徑；顯式 name-only 把「harness 依用量隨機決定」變成
+  # 「已知決定」，把預算留給只能靠 description 觸發的 stack skill。只釘這 7 個鍵的值，不釘 map 其餘內容
+  # （/skills 選單會寫入其他鍵）。失效方向：jq 缺席／壞 JSON／任一鍵缺或值非 name-only 皆紅。
+  if jq -e '
+    [.skillOverrides["security-audit","shared-security-review","research","microsoft-docs","microsoft-code-reference","tdd","web-design-reviewer"]]
+    | length == 7 and all(. == "name-only")
+  ' settings.json >/dev/null; then
+    ok "skillOverrides：7 支以名字 route 的 skill 釘為 name-only"
+  else
+    bad "settings.json 的 skillOverrides 必須把 security-audit／shared-security-review／research／microsoft-docs／microsoft-code-reference／tdd／web-design-reviewer 設為 name-only（缺鍵、值不符、jq 缺席或檔案不可解析）"
+  fi
+  # name-only 指向不存在的 skill 是死鍵：symlink 被 agents-sync prune 後這條會紅，逼人同步清 override。
+  missing_override_targets=""
+  for s in security-audit shared-security-review research microsoft-docs microsoft-code-reference tdd web-design-reviewer; do
+    [ -L "skills/$s" ] || missing_override_targets="$missing_override_targets $s"
+  done
+  if [ -z "$missing_override_targets" ]; then
+    ok "skillOverrides 的 7 個目標都有 skills/<name> symlink"
+  else
+    bad "skillOverrides 指向不存在的 skill：${missing_override_targets}（刪 override 或恢復 symlink）"
+  fi
 fi
 
 # ── 2. skill symlink 形狀 ─────────────────────────────────────
