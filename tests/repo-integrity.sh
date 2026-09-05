@@ -973,13 +973,15 @@ if [ -f hooks/turn-mode.sh ]; then
     bad "turn-mode selftest 失敗（上列為輸出末段）"
   fi
   # 主路徑（stdin JSON → jq → classify → case 分派）不在 --selftest 射程內：S5 實測把 dev 分支
-  # 換成 STEER_ASK，selftest 仍全綠。這三條從 hook 外面打 stdin，釘住每個分支輸出的字面；
-  # 失效方向：hook 崩潰或 jq 缺席都會讓 dev／ask 兩條拿到空輸出 → 紅，不會偏綠。
+  # 換成 STEER_ASK，selftest 仍全綠。下面前三條從 hook 外面打 stdin，各釘住一個分支輸出的字面，
+  # 第四條釘大提示截斷後的尾錨；失效方向：hook 崩潰或 jq 缺席都會讓 dev／ask 兩條拿到空輸出 → 紅，不會偏綠。
   # 形狀比照 _push_probe：每個 case 各出一行 ok／bad，bad 印 want／got 與 stderr，紅的時候不用重跑才知道
   # 是哪一條、hook 實際吐了什麼；只判 stdout，stderr 雜訊不算失敗但會印出來。
   _tm_probe() {  # $1 = 分類名 $2 = prompt $3 = 期望 stdout 含此片段，空字串＝期望 stdout 為空
-    local want="$3" out err errf="${TMPDIR:-/tmp}/tm-probe-stderr.$$"
-    out=$(jq -nc --arg p "$2" '{prompt:$p}' | bash hooks/turn-mode.sh 2>"$errf")
+    local want="$3" out err errf
+    errf=$(mktemp "${TMPDIR:-/tmp}/tm-probe.XXXXXX") ||
+      { bad "turn-mode 主路徑 $1：mktemp 失敗，無法收 stderr"; return; }
+    out=$({ jq -nc --arg p "$2" '{prompt:$p}' | bash hooks/turn-mode.sh; } 2>"$errf")
     err=$(cat "$errf" 2>/dev/null); rm -f "$errf"
     if { [ -z "$want" ] && [ -z "$out" ]; } || { [ -n "$want" ] && [[ "$out" == *"$want"* ]]; }; then
       ok "turn-mode 主路徑 $1 → ${want:-無輸出}"
