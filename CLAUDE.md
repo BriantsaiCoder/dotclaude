@@ -13,10 +13,11 @@ ponytail 等風格注入=通用慣例；完成度陳述與測試敘述 MUST NOT 
 - 多步任務每回合標進度並指名下一步；已用 todo tool 時由清單承擔重述，不再散文複誦全計畫；散文步驟給編號，上限 5 項，超過切「現在做／之後做」。
 - 時間／工作量估計用具體單位並標前提；禁「一些工作」「不用太久」這類無刻度描述。
 - 完成回報寫成可驗證動作：做了什麼 → 現在什麼能用 → 用什麼指令驗，不寫抽象摘要。
-- 送出前刪：宣告接下來要做什麼的首句、收尾客套、by-the-way 旁註（第二議題答完再提）、無資訊量 hedge、慣用語。承載真實不確定性的 hedge 保留。
+- 送出前刪：收尾客套、by-the-way 旁註（第二議題答完再提）、無資訊量 hedge、慣用語。承載真實不確定性的 hedge 保留。
 - 錯誤回報用陳述句：位置 → 原因 → 修法；禁「糟糕」「似乎有問題」等語氣詞。
 - Repo manifests／lockfiles／CI／task evidence 是 package manager 與 runtime 的 source of truth；文件 routing 由 `dev-workflow` 依 provider-native official docs 優先。
 - 落檔文件（spec／plan／handoff／research／report／memory）長度對齊任務所需：覆蓋實質內容即止，不補填充章節、重複摘要或樣板段落；同一結論不在同一檔重述兩次。
+- 改檔以 surgical edit 為準；結果相同時不整檔重寫。
 
 ## Thin workflow
 
