@@ -18,8 +18,8 @@ jobs:
       # 這是預期的：repo-integrity.sh 只驗 symlink 的「形狀」不驗目標存在，
       # 因為形狀錯（絕對路徑、指到別的 kind、改名沒重連）才是會靜默換掉
       # skill 內容的那一種失效。目標存在性由本機 `agents-sync --doctor` 負責。
-      # ripgrep 不可省：repo-integrity.sh 大量以 `rg` 斷言。缺它時第 8／8b 節的
-      # 可用性檢查會 fail-closed 讓 suite 直接紅，其餘 rg 斷言仍可能依極性假綠。
+      # ripgrep 不可省：repo-integrity.sh 大量以 `rg` 斷言。缺它時腳本開頭的全域守衛
+      # 印一條 FAIL 就中止（#57），不再有任何斷言依極性假綠。
       # 這裡不寫死處數：註解一旦複述腳本內容就會漂移（原本寫 12，實際已是 21）。
       #
       # update 失敗不致命。runner image 預載第三方 apt repo，其中任何一家掛掉都會讓
@@ -32,10 +32,10 @@ jobs:
       # install 本身仍是致命的，只有 update 被降級。
       #
       # 兩個工具缺席的後果不同，2026-08-27 於本 repo 實測（不記數字，理由同上一段）：
-      #   缺 ripgrep    → suite 已經會紅。第 8 與 8b 節開頭的 rg 可用性檢查自
-      #                   19a2256（2026-08-03）起 fail-closed，晚於 run 30671830610。
-      #                   這裡擋它是 defence-in-depth，並讓訊息指名工具，而不是
-      #                   讓人從一堆 FAIL 斷言裡回推工具沒裝。
+      #   缺 ripgrep    → suite 已經會紅（08-27 實測如此）。#57 起腳本開頭的全域守衛
+      #                   缺 rg 即整份中止，機制與歷史見 tests/repo-integrity.sh 檔頭。
+      #                   這裡擋它是 defence-in-depth：把缺工具的失敗定位在「工具就緒」
+      #                   這一步並指名缺哪一個，而不是到下一步才看到腳本中止。
       #   缺 shellcheck → suite 仍然是綠的。第 4 節印 SKIP 不印 FAIL，覆蓋率靜默
       #                   流失而沒有人會發現——這才是本步驟真正堵住的洞。
       - name: 工具就緒
