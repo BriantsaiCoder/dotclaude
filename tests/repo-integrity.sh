@@ -75,7 +75,7 @@ if [ -f settings.json ]; then
   if jq -e '.fastModePerSessionOptIn == true' settings.json >/dev/null; then
     ok "fast mode 需每 session 明示 opt-in（fastModePerSessionOptIn）"
   else
-    bad "settings.json 缺 fastModePerSessionOptIn: true——fast mode 會以 usage credits 自動起跑"
+    bad "settings.json 的 fastModePerSessionOptIn 必須為 true（現值非 true、缺鍵、jq 缺席或檔案不可解析）——否則 fast mode 會以 usage credits 自動起跑"
   fi
 fi
 
