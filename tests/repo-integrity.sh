@@ -475,10 +475,10 @@ if [ -n "$dc_dir" ] && mkdir -p "$dc_dir/hooks" "$dc_dir/tests" && cp hooks/drif
   else
     bad "drift-check 成功時仍有輸出 rc=${dc_rc} stdout=«${dc_out:0:80}» stderr=«${dc_err:0:80}»"
   fi
-  rm -rf "$dc_dir"
 else
   bad "drift-check 探針：無法建立 fixture"
 fi
+[ -n "$dc_dir" ] && rm -rf "$dc_dir"   # mktemp 成功但 mkdir／cp 失敗也要清
 
 # ── 7. 阻擋型 hook fail-closed ─────────────────────────────────
 #
