@@ -456,7 +456,9 @@ if grep -Fqx -- '- 改檔以 surgical edit 為準；結果相同時不整檔重�
 else
   bad "CLAUDE.md 缺 surgical-edit 行（官方 Fable 5.1 targeted-edit delta）"
 fi
-if rg -q '宣告接下來要做什麼' CLAUDE.md; then
+# 反向 pin 用 grep -Fq 不用 rg：此處在後段的 command -v rg 守衛之前，缺 rg 時 rg 非零退出會走 else
+# 印 PASS（極性假綠，同 CI 缺 rg 那次的形狀）；grep 是 POSIX 必備，子字串比對也不需要 regex。
+if grep -Fq -- '宣告接下來要做什麼' CLAUDE.md; then
   bad "CLAUDE.md 回流 narration suppressor「宣告接下來要做什麼」——與 harness progress line 衝突"
 else
   ok "CLAUDE.md 無 narration suppressor"
