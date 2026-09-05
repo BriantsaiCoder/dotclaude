@@ -2109,7 +2109,8 @@ fi
 # `claude -p --model <alias>`，五個別名（opus／opus[1m]／claude-opus-5→high；fable／claude-fable-5-1→xhigh）皆符。失效方向
 # （使用者選定）：Fable id 換代→釘子失配→靜默落回 high，屆時在 Fable session 跑一次 /effort xhigh 即寫回新 id。
 # 斷言連帶：只釘頂層等於釘一條 harness 已不走的路——對 staged 檔注入 `claude-opus-5: low` 實測舊斷言仍 PASS，改為
-# 頂層與 modelSettings 內每個 model 一起落在允許集合（缺 effortLevel 視同 high）。
+# 頂層與 modelSettings 內每個 model 一起落在允許集合。fallback 只給 modelSettings 內缺 effortLevel 的條目（視同 high，
+# 那是 passthrough 形狀允許的空殼）；頂層缺鍵仍 FAIL，維持上面「擋得住掉回未指定」的原意。
 if jq -e '
   (.model == "default" or (.model | ascii_downcase | test("^(claude-)?opus([-\\[]|$)"))) and
   .advisorModel == "opus" and
