@@ -45,7 +45,10 @@ if [ -f settings.json ]; then
   # ultracode 曾與 workflowSizeGuideline 一起釘在這裡當成本閘門，2026-08-06 移除：它是使用者
   # 可經 /config 或 prompt 逐次開關的偏好，開了之後 Claude Code 會寫回 settings.json，於是每次
   # 調整都變成 CI 紅燈。workflowSizeGuideline 留著——那個鍵不會被互動操作自動寫回，釘死不會誤傷。
-  # 代價講明：ultracode 被調開不再有任何警告，成本控制改由 /config 與使用者自己把關。
+  # 代價講明：本檔不再對 ultracode 被調開發警告，成本控制改由 /config 與使用者自己把關；2026-09-05 起
+  # hook 層補了執行期警示（hooks/turn-mode.sh 的 ultracode 守衛：true 時對非開發型提示多一行 steer），CI 仍不釘。
+  # 註：2.1.259 實證 /effort ultracode 是 session-only 不落檔、/config 無 ultracode 列——「互動切換會寫回」這個
+  # 移除理由在現版不成立，檔案值變 true 只會是手改／git／--settings 的 drift；要不要釘回是使用者決策。
   if jq -e '
     ((has("workflowSizeGuideline") | not) or .workflowSizeGuideline == "unrestricted") and
     (.enabledPlugins["context7@claude-plugins-official"] == true) and
@@ -975,18 +978,19 @@ if [ -f hooks/turn-mode.sh ]; then
   # 主路徑（stdin JSON → jq → classify → case 分派）不在 --selftest 射程內：S5 實測把 dev 分支
   # 換成 STEER_ASK，selftest 仍全綠。下面前三條從 hook 外面打 stdin，各釘住一個分支輸出的字面，
   # 第四條釘大提示截斷後的尾錨；失效方向：hook 崩潰或 jq 缺席都會讓 dev／ask 兩條拿到空輸出 → 紅，不會偏綠。
-  # 形狀比照 _push_probe：每個 case 各出一行 ok／bad，bad 印 want／got 與 stderr，紅的時候不用重跑才知道
-  # 是哪一條、hook 實際吐了什麼；只判 stdout，stderr 雜訊不算失敗但會印出來。
-  _tm_probe() {  # $1 = 分類名 $2 = prompt $3 = 期望 stdout 含此片段，空字串＝期望 stdout 為空
-    local want="$3" out err errf
-    errf=$(mktemp "${TMPDIR:-/tmp}/tm-probe.XXXXXX") ||
-      { bad "turn-mode 主路徑 $1：mktemp 失敗，無法收 stderr"; return; }
-    out=$({ jq -nc --arg p "$2" '{prompt:$p}' | bash hooks/turn-mode.sh; } 2>"$errf")
-    err=$(cat "$errf" 2>/dev/null); rm -f "$errf"
-    if { [ -z "$want" ] && [ -z "$out" ]; } || { [ -n "$want" ] && [[ "$out" == *"$want"* ]]; }; then
-      ok "turn-mode 主路徑 $1 → ${want:-無輸出}"
+  # 形狀比照 _push_probe：section 一個 fixture 目錄、每 case 一行 ok／bad（bad 印 want／got／stderr）；只判 stdout。
+  # 探針一律把 HOME 指到 fixture 目錄，本機真 settings.json 的 ultracode 值不參與紅綠（本檔對該鍵刻意不釘，
+  # 見 :45-49；檔案值變 true 只會來自手改／git／--settings，/effort ultracode 是 session-only 不落檔）。
+  tm_probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/repo-integrity.XXXXXX")" || tm_probe_dir=""
+  _tm_probe() {  # $1 = 分類名 $2 = prompt $3 = 期望 stdout 含此片段，空字串＝期望 stdout 為空 [$4 = 不得含此片段]
+    local want="$3" deny="${4:-}" out err
+    [ -n "$tm_probe_dir" ] || { bad "turn-mode 主路徑 $1：無法建立 fixture 目錄"; return; }
+    out=$({ jq -nc --arg p "$2" '{prompt:$p}' | HOME="$tm_probe_dir/home" bash hooks/turn-mode.sh; } 2>"$tm_probe_dir/stderr")
+    err=$(cat "$tm_probe_dir/stderr" 2>/dev/null)
+    if [[ ( -z "$want" && -z "$out" || -n "$want" && "$out" == *"$want"* ) && ( -z "$deny" || "$out" != *"$deny"* ) ]]; then
+      ok "turn-mode 主路徑 $1 → ${want:-無輸出}${deny:+（且不含 ${deny}）}"
     else
-      bad "turn-mode 主路徑 $1 want=«${want:-無輸出}» got=«${out:0:80}»${err:+ stderr=«${err:0:80}»}: ${2:0:60}"
+      bad "turn-mode 主路徑 $1 want=«${want:-無輸出}»${deny:+ deny=«${deny}»} got=«${out:0:80}»${err:+ stderr=«${err:0:80}»}: ${2:0:60}"
     fi
   }
   _tm_probe dev    '審查這個 PR 的 Standards 與 Spec 兩軸' '開發型任務'
@@ -994,6 +998,21 @@ if [ -f hooks/turn-mode.sh ]; then
   _tm_probe silent '安裝https://github.com/cathrynlavery/diagram-design' ''
   # 超過 8K 的提示只掃頭尾各 4K（效能），$ 錨必須留在真正的串尾：貼 9K log 再問「審查過了嗎」仍要是 ask
   _tm_probe big    "$(printf 'x%.0s' $(seq 1 9000))"$'\n審查過了嗎' '問題／分析型'
+  # ultracode 守衛：settings.json 的 ultracode 為 true（repo-state drift）時，silent 類提示要多一行 steer；
+  # dev／ask 不變，系統通知與明示 opt-in（skip）連 steer 都不給；false 時 silent 維持無輸出。
+  if [ -n "$tm_probe_dir" ] && mkdir -p "$tm_probe_dir/home/.claude"; then
+    printf '{"ultracode":true}\n' > "$tm_probe_dir/home/.claude/settings.json"
+    _tm_probe 'ultracode=true silent' '安裝https://github.com/cathrynlavery/diagram-design' 'ultracode=true（'
+    _tm_probe 'ultracode=true dev'    '審查這個 PR 的 Standards 與 Spec 兩軸' '開發型任務' 'ultracode=true（'
+    _tm_probe 'ultracode=true ask'    '審查過了嗎' '問題／分析型' 'ultracode=true（'
+    _tm_probe 'ultracode=true notice' $'[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>x' ''
+    _tm_probe 'ultracode=true optin'  'ultracode 幫我更新所有 plugin' ''
+    printf '{"ultracode":false}\n' > "$tm_probe_dir/home/.claude/settings.json"
+    _tm_probe 'ultracode=false silent' '安裝https://github.com/cathrynlavery/diagram-design' ''
+  else
+    bad "turn-mode ultracode 守衛：無法建立 fixture settings"
+  fi
+  [ -n "$tm_probe_dir" ] && rm -rf "$tm_probe_dir"
 fi
 
 # 行為案例只在條件真的成立時才跑：/tmp 可寫就重現不了，標 SKIP 而不是給一個

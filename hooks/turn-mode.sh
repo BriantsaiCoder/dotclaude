@@ -20,6 +20,12 @@
 #       `git log --grep=refactor` 這種含 DEV 名詞的機械指令會判 dev——ERE 沒有 lookbehind，加指令前綴白名單是把
 #       shell 知識塞進分類器，不做；靠 steer 的「單代理能收斂就不編排」兜底。
 # 純 heuristic、advisory：不擋任何動作。失效方向：無 jq／payload 讀不到 → 靜默 → 不開 Workflow（便宜側）。
+# ultracode 守衛：「silent＝不開 Workflow」建立在 settings.json ultracode=false 上，而 repo-integrity 自 2026-08-06 起
+#       刻意不釘該鍵。2.1.259 binary 實證：/effort ultracode 是 session-only 不落檔、/config 沒有 ultracode 列，檔案值變 true
+#       只會來自手改／git（revert、checkout 舊 commit）／--settings，屬 repo-state drift；本守衛覆蓋的是這種 drift，
+#       不覆蓋 session 內的 /effort ultracode。放在每回合而非 SessionStart 的理由只有一個：steer 每回合重注入，撐得過 /compact。
+#       做法：silent 類提示多讀一次 settings（jq，約 3 ms），true 就補一行 steer；讀不到或 jq 失敗 → 不警示（偏貴側）。
+#       ponytail: 只讀 user scope 的 ~/.claude/settings.json；project／managed scope 的 ultracode:true 不覆蓋。
 # 整串比對用 bash [[ =~ ]]（$ 錨串尾而非逐行；nocasematch 讓英文樣式不分大小寫）。ASK 先於 DEV：
 # 「審查這個 PR 是否有問題」「審查過了嗎」「重構後會不會壞掉」是問句不是編排：DEV 進場後 ASK 漏判的代價從「靜默」
 # 升為「開 Workflow」，所以 ASK 比 #47 寬——成員看 regex 本身，不在此重抄；句尾組列成 嗎|呢|沒|沒有 四個成員而不用
@@ -49,11 +55,13 @@ DEV="審查|稽核|掃描.*(repo|codebase|專案|目錄)|遷移|重構|修復|�
 STEER_ASK='[turn-mode] 問題／分析型提問（使用者規則，來源 ~/.claude/hooks/turn-mode.sh）：單代理直答，需要佐證自行並行查證；本回合不新開 Workflow、不等 Workflow，已啟動的 delegation 不受影響。若回答過程確認必須改檔，改檔部分仍依 dev-workflow。'
 STEER_DEV='[turn-mode] 開發型任務（使用者規則，來源 ~/.claude/hooks/turn-mode.sh）：本回合視同 ultracode opt-in——審查／遷移／重構／修 bug 這類需獨立對抗驗證的多檔工作可編排 Workflow，仍同步自查、不閒等，529 一次即棄；單代理能收斂就不編排。若這其實是問句／分析請求（regex 漏判），仍單代理直答、不視同 opt-in。'
 
-classify() {  # $1 = prompt → ask | dev | silent
+STEER_ULTRA='[turn-mode] settings.json ultracode=true（使用者規則，來源 ~/.claude/hooks/turn-mode.sh）：本提示未命中開發型樣式，不視同 opt-in——單代理處理、不開 Workflow。該值只會因手改／git／--settings 而來，屬 repo-state drift，回覆時提醒使用者改回 false。'
+
+classify() {  # $1 = prompt → ask | dev | silent | skip（skip = 系統通知與明示 opt-in，連 ultracode 警示都不給）
   # 背景 agent／workflow 的 task-notification 也走 UserPromptSubmit，內文常含 review／審查；那不是使用者的提示，
   # 不能因此「視同 opt-in」。之前沒現形只是因為通知裡剛好都有 ultracode 字面被 OPTIN 靜默掉。
-  [[ $1 == *'<task-notification>'* || $1 == *'[SYSTEM NOTIFICATION'* ]] && { echo silent; return; }
-  [[ $1 =~ $OPTIN ]] && { echo silent; return; }
+  [[ $1 == *'<task-notification>'* || $1 == *'[SYSTEM NOTIFICATION'* ]] && { echo skip; return; }
+  [[ $1 =~ $OPTIN ]] && { echo skip; return; }   # 明示 opt-in 交給 harness
   [[ $1 =~ $ASK ]] && { echo ask; return; }
   [[ $1 =~ $DEV ]] && { echo dev; return; }
   echo silent
@@ -127,7 +135,7 @@ if [ "$1" = "--selftest" ]; then
   check dev    '重構 FileProcess 與 DbAccess 的共用 seam'
   check dev    'refactor the analysis it produced'
   check silent '幫我把 DbAccess.TruncateRemark 的上限改成 255 並補 regression test'
-  check silent 'ultracode 幫我全面審查這個 PR 是否有問題'
+  check skip   'ultracode 幫我全面審查這個 PR 是否有問題'
   check silent '安裝https://github.com/cathrynlavery/diagram-design'
   check silent '全面更新所有 plugin 到最新版'
   check silent '徹底清掉 node_modules 再重裝'
@@ -144,7 +152,7 @@ if [ "$1" = "--selftest" ]; then
   check silent 'ask the reviewer to look again'
   check silent 'Go'
   check silent 'we should implement retry'
-  check silent $'[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<summary>Agent "S5 Standards review" finished</summary>\n審查對象：a4f3aca'
+  check skip   $'[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<summary>Agent "S5 Standards review" finished</summary>\n審查對象：a4f3aca'
   check silent $'把 X 改成 Y\n這樣可以嗎？\n然後補測試'
   check silent $'請改成 const x = a ? b : c\n並補測試'
   [ "$fail" = 0 ] && echo "turn-mode selftest: all $n cases pass"
@@ -160,5 +168,6 @@ p=$(jq -r '.prompt // empty' 2>/dev/null)
 case "$(classify "$p")" in
   ask) echo "$STEER_ASK" ;;
   dev) echo "$STEER_DEV" ;;
+  silent) jq -e '.ultracode == true' "$HOME/.claude/settings.json" >/dev/null 2>&1 && echo "$STEER_ULTRA" ;;
 esac
 exit 0
